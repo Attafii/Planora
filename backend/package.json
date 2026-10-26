@@ -1,0 +1,7 @@
+{
+  "name": "planify-account-api",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.17" },
+  "scripts": { "start": "node server.mjs", "test": "node --test" }
+}

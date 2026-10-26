@@ -1,11 +1,11 @@
 {
-    "name": "mobile_project",
-    "short_name": "mobile_project",
+    "name": "Planify",
+    "short_name": "Planify",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#051B47",
+    "theme_color": "#051B47",
+    "description": "Plan your day. Make room for life.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
