@@ -1,7 +1,5 @@
 # Planify — Eya account layer
 
-Branch: `eya-authentication`, based on `master` at `4b7d811`.
-
 This branch implements authentication, personal profile, persistent preferences,
 privacy consent, and private insights. It contains no task editing, goal/project
 management, assistant implementation, achievement views, or focus tracking.
