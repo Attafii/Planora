@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { proposePlanning } from './planning.mjs';
 import { pathToFileURL } from 'node:url';
 
 const text = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
@@ -89,7 +90,7 @@ export function createServer() {
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Content-Type', 'application/json');
     if (req.method === 'OPTIONS') return res.writeHead(204).end();
-    if (req.method !== 'POST' || req.url !== '/propose') return res.writeHead(404).end('{}');
+    if (req.method !== 'POST' || !['/propose', '/planning/propose'].includes(req.url)) return res.writeHead(404).end('{}');
     try {
       let input = '';
       for await (const chunk of req) {
@@ -102,7 +103,7 @@ export function createServer() {
       let body;
       try { body = JSON.parse(input); }
       catch { return res.writeHead(400).end(JSON.stringify({ error: 'Invalid JSON request.' })); }
-      res.end(JSON.stringify(await propose(body)));
+      res.end(JSON.stringify(await (req.url === '/planning/propose' ? proposePlanning(body) : propose(body))));
     } catch (error) {
       res.writeHead(error.status || 502).end(JSON.stringify({
         error: error.status ? error.message : 'AI unavailable. Check the service and provider configuration.',

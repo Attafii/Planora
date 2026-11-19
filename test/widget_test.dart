@@ -14,11 +14,22 @@ class MemoryPreferences extends Fake implements SharedPreferencesAsync {
 }
 
 void main() {
-  testWidgets('opens the task module', (tester) async {
-    await tester.pumpWidget(Planify(store: TaskStore(MemoryPreferences())));
+  testWidgets('opens tasks and navigates to the calendar', (tester) async {
+    await tester.pumpWidget(
+      Planify(
+        store: TaskStore(MemoryPreferences()),
+        planningStorage: MemoryPreferences(),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('Planify · Tasks'), findsOneWidget);
     expect(find.text('Add task'), findsOneWidget);
+    await tester.tap(find.text('Calendar'));
+    await tester.pumpAndSettle();
+    expect(find.text('Planify · Calendar'), findsOneWidget);
+    expect(find.text('Working hours'), findsOneWidget);
+    expect(find.text('Lunch'), findsOneWidget);
+    expect(find.text('Report interruption'), findsOneWidget);
   });
 
   test(
