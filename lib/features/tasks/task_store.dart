@@ -99,13 +99,20 @@ class TaskStore extends ChangeNotifier {
   List<Task> get inbox {
     final today = DateTime.now();
     final first = DateTime.utc(today.year, today.month, today.day);
+    return _taskList(first, -30, 60);
+  }
+
+  List<Task> forPlanningDate(String date) =>
+      _taskList(DateTime.parse('${date}T00:00:00Z'), 0, 0);
+
+  List<Task> _taskList(DateTime first, int from, int through) {
     final tasks = <String, Task>{
       for (final task in _saved.values)
         if (task.parent == null && task.repeat == Repeat.once) task.id: task,
     };
     for (final series in _saved.values.where((t) => t.repeat != Repeat.once)) {
       final anchor = DateTime.parse('${series.due}T00:00:00Z');
-      for (var offset = -30; offset <= 60; offset++) {
+      for (var offset = from; offset <= through; offset++) {
         final date = first.add(Duration(days: offset));
         final key = dayKey(date);
         if (date.isBefore(anchor) ||

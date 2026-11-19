@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app/theme/account_theme.dart';
+import 'app/theme/app_theme.dart';
 import 'features/tasks/task_store.dart';
 import 'features/planning/planning_page.dart';
 import 'features/planning/planning_store.dart';
@@ -42,22 +44,8 @@ class _PlanifyState extends State<Planify> {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: 'Planify',
-    theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF3B82F6),
-        primary: const Color(0xFF051B47),
-        surface: const Color(0xFFFAF9F6),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-    ),
-    darkTheme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF3B82F6),
-        brightness: Brightness.dark,
-      ),
-    ),
+    theme: AppTheme.light,
+    darkTheme: PlanifyTheme.build(Brightness.dark),
     home: FutureBuilder<void>(
       future: ready,
       builder: (context, snapshot) {

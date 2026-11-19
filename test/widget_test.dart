@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_project/features/tasks/task_store.dart';
 import 'package:mobile_project/main.dart';
@@ -27,6 +28,14 @@ void main() {
     await tester.tap(find.text('Calendar'));
     await tester.pumpAndSettle();
     expect(find.text('Planify · Calendar'), findsOneWidget);
+    expect(find.text('Month'), findsOneWidget);
+    await tester.tap(find.text('Day'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Lunch'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Working hours'), findsOneWidget);
     expect(find.text('Lunch'), findsOneWidget);
     expect(find.text('Report interruption'), findsOneWidget);

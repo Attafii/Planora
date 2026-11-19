@@ -2,7 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../app/theme/planify_brand.dart';
 import '../tasks/task_store.dart';
+import 'calendar_panel.dart';
 import 'planning_agent.dart';
 import 'planning_engine.dart';
 import 'planning_store.dart';
@@ -18,6 +20,7 @@ class PlanningPage extends StatefulWidget {
 class _PlanningPageState extends State<PlanningPage> {
   final agent = PlanningAgent();
   String date = dayKey(DateTime.now());
+  CalendarView calendarView = CalendarView.month;
   bool busy = false;
   PlanningStore get store => widget.store;
 
@@ -44,12 +47,11 @@ class _PlanningPageState extends State<PlanningPage> {
   }
 
   Future<void> chooseDate() async {
-    final now = DateTime.now();
     final value = await showDatePicker(
       context: context,
       initialDate: DateTime.parse(date),
-      firstDate: DateTime(now.year, now.month - 12, now.day),
-      lastDate: DateTime(now.year, now.month, now.day + 60),
+      firstDate: DateTime(firstCalendarYear),
+      lastDate: DateTime(lastCalendarYear, 12, 31),
     );
     if (value != null && mounted) setState(() => date = dayKey(value));
   }
@@ -81,9 +83,10 @@ class _PlanningPageState extends State<PlanningPage> {
   }
 
   Future<void> editReserved([PlanBlock? block]) async {
+    final start = math.min(1439, math.max(540, store.cutoffFor(date)));
     final result = await editInterval(
-      'Reserve time',
-      block?.interval ?? (start: 900, end: 930),
+      'Add event',
+      block?.interval ?? (start: start, end: math.min(start + 30, 1440)),
       label: block?.title ?? '',
       kind: block?.kind ?? BlockKind.commitment,
     );
@@ -283,134 +286,218 @@ class _PlanningPageState extends State<PlanningPage> {
       final current = store.day(date);
       final timeline = [...current.approved, ...current.reserved]
         ..sort((a, b) => a.start.compareTo(b.start));
-      final editable = !busy && store.cutoffFor(date) < 1440;
+      final canEdit = !busy && store.cutoffFor(date) < 1440;
+      final calendar = CalendarPanel(
+        date: DateTime.parse(date),
+        view: calendarView,
+        enabled: !busy,
+        blocksFor: store.calendarEntries,
+        onJump: chooseDate,
+        onDate: (value) => setState(() => date = dayKey(value)),
+        onView: (value) => setState(() => calendarView = value),
+      );
+      final agenda = buildAgenda(context, current, timeline, canEdit);
       return Scaffold(
         appBar: AppBar(
+          leading: const Center(child: PlanifyMark(size: 30)),
           title: const Text('Planify · Calendar'),
           actions: [
             IconButton(
-              tooltip: 'Revision history',
+              tooltip: 'Revision history for selected date',
               onPressed: () => history(current),
-              icon: const Icon(Icons.history),
+              icon: const Icon(Icons.history_rounded),
             ),
+            const SizedBox(width: 8),
           ],
         ),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 820),
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                if (busy) const LinearProgressIndicator(),
-                TextButton.icon(
-                  onPressed: busy ? null : chooseDate,
-                  icon: const Icon(Icons.date_range),
-                  label: Text(
-                    MaterialLocalizations.of(context)
-                        .formatFullDate(DateTime.parse(date)),
-                  ),
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Working hours'),
-                  subtitle: Text(
-                    intervalLabel(current.workday.start, current.workday.end),
-                  ),
-                  trailing: IconButton(
-                    tooltip: 'Edit working hours',
-                    onPressed: editable ? () => run(editHours) : null,
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-                ),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final split =
+                constraints.maxWidth >= 1000 &&
+                calendarView != CalendarView.day;
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1320),
+                child: ListView(
+                  padding: EdgeInsets.all(split ? 24 : 14),
                   children: [
-                    FilledButton.icon(
-                      onPressed: editable
-                          ? () => run(() => review(store.preview(date)))
-                          : null,
-                      icon: const Icon(Icons.calendar_view_day),
-                      label: const Text('Generate schedule'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: editable
-                          ? () => run(() => editReserved())
-                          : null,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Reserve time'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: editable ? () => run(interrupt) : null,
-                      icon: const Icon(Icons.pause_circle_outline),
-                      label: const Text('Report interruption'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: editable ? () => run(interpret) : null,
-                      icon: const Icon(Icons.auto_awesome),
-                      label: const Text('Ask planning AI'),
-                    ),
+                    if (busy) const LinearProgressIndicator(),
+                    if (split)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 6, child: calendar),
+                          const SizedBox(width: 24),
+                          Expanded(flex: 5, child: agenda),
+                        ],
+                      )
+                    else ...[
+                      calendar,
+                      const SizedBox(height: 18),
+                      agenda,
+                    ],
                   ],
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  'Day timeline',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                if (current.approved.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Text('No approved task blocks for this day.'),
-                  ),
-                for (final block in timeline)
-                  Card(
-                    child: ListTile(
-                      leading: Icon(switch (block.kind) {
-                        BlockKind.task => Icons.checklist,
-                        BlockKind.pause => Icons.coffee_outlined,
-                        _ => Icons.lock_outline,
-                      }),
-                      title: Text(block.title),
-                      subtitle: Text(
-                        '${intervalLabel(block.start, block.end)} · ${switch (block.kind) {
-                          BlockKind.task => 'Task',
-                          BlockKind.pause => 'Break',
-                          BlockKind.commitment => 'Fixed commitment',
-                          BlockKind.unavailable => 'Unavailable',
-                        }}',
-                      ),
-                      trailing:
-                          block.kind != BlockKind.task &&
-                              editable &&
-                              block.start >= store.cutoffFor(date)
-                          ? PopupMenuButton<String>(
-                              tooltip: 'Manage reserved time',
-                              onSelected: (action) => run(
-                                () => action == 'edit'
-                                    ? editReserved(block)
-                                    : removeReserved(block),
-                              ),
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Edit'),
-                                ),
-                                PopupMenuItem(
-                                  value: 'remove',
-                                  child: Text('Remove'),
-                                ),
-                              ],
-                            )
-                          : null,
-                    ),
-                  ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         ),
       );
     },
   );
+
+  Widget buildAgenda(
+    BuildContext context,
+    DayPlan plan,
+    List<PlanBlock> timeline,
+    bool editable,
+  ) {
+    final theme = Theme.of(context);
+    final dateLabel = MaterialLocalizations.of(context)
+        .formatFullDate(DateTime.parse(date));
+    final scheduled = plan.approved.length;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Agenda', style: theme.textTheme.headlineMedium),
+            Text(dateLabel, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.schedule_rounded),
+              title: const Text('Working hours'),
+              subtitle: Text(
+                intervalLabel(plan.workday.start, plan.workday.end),
+              ),
+              trailing: IconButton(
+                tooltip: 'Edit working hours',
+                onPressed: editable ? () => run(editHours) : null,
+                icon: const Icon(Icons.edit_outlined),
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: editable
+                      ? () => run(() => review(store.preview(date)))
+                      : null,
+                  icon: const Icon(Icons.auto_fix_high_rounded),
+                  label: const Text('Generate schedule'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: editable ? () => run(() => editReserved()) : null,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Add event'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: editable ? () => run(interrupt) : null,
+                  icon: const Icon(Icons.pause_circle_outline),
+                  label: const Text('Report interruption'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: editable ? () => run(interpret) : null,
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                  label: const Text('Ask planning AI'),
+                ),
+              ],
+            ),
+            const Divider(),
+            if (scheduled == 0)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text('No approved tasks on this date.'),
+              ),
+            for (final block in timeline)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: buildBlock(context, block, editable),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget buildBlock(BuildContext context, PlanBlock block, bool editable) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final canManage =
+        editable &&
+        block.kind != BlockKind.task &&
+        block.start >= store.cutoffFor(date);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 52,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              clockLabel(block.start),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Material(
+            color: blockColor(scheme, block.kind),
+            borderRadius: BorderRadius.circular(14),
+            child: ListTile(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              leading: Icon(blockIcon(block.kind), color: scheme.onSurface),
+              title: Text(block.title),
+              subtitle: Text(
+                '${blockType(block.kind)} · Until ${clockLabel(block.end)}',
+              ),
+              onTap: () => showBlock(block, canManage),
+              trailing: const Icon(Icons.chevron_right_rounded),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> showBlock(PlanBlock block, bool canManage) async {
+    final action = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(block.title),
+        content: Text(
+          '${blockType(block.kind)}\n'
+          '${MaterialLocalizations.of(context).formatFullDate(DateTime.parse(date))}\n'
+          '${intervalLabel(block.start, block.end)}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          if (canManage) ...[
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'remove'),
+              child: const Text('Remove'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, 'edit'),
+              child: const Text('Edit event'),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (action == 'edit' && mounted) await run(() => editReserved(block));
+    if (action == 'remove' && mounted) await run(() => removeReserved(block));
+  }
 }
 
 class _IntervalEditor extends StatefulWidget {

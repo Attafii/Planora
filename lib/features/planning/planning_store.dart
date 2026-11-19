@@ -78,6 +78,13 @@ class PlanningStore extends ChangeNotifier {
 
   DayPlan day(String date) => _days[date] ?? const DayPlan();
 
+  List<PlanBlock> calendarEntries(String date) {
+    final plan = _days[date];
+    if (plan == null) return const [];
+    return [...plan.approved, ...plan.reserved]
+      ..sort((a, b) => a.start.compareTo(b.start));
+  }
+
   Future<void> load() async {
     final stored = await storage.getString(_key);
     if (stored != null) {
@@ -156,7 +163,7 @@ class PlanningStore extends ChangeNotifier {
         ),
     ];
     final candidates = [
-      for (final parent in tasks.inbox)
+      for (final parent in tasks.forPlanningDate(date))
         if (!parent.occurrence || parent.due == date)
           for (final task
               in tasks.children(parent.id).isEmpty
