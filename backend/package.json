@@ -7,10 +7,10 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env src/server.mjs",
-    "dev": "node --watch --env-file-if-exists=.env src/server.mjs",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs",
-    "check": "node scripts/check.mjs"
+    "start": "node --env-file-if-exists=.env planify.mjs",
+    "dev": "node --watch --env-file-if-exists=.env planify.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs *.test.mjs",
+    "check": "node scripts/check.mjs && node --check planify.mjs && node --check server.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.9",

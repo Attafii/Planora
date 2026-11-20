@@ -1,18 +1,25 @@
 import 'package:flutter/material.dart';
 
+import '../../core/services/app_session.dart';
+
 import 'task_agent.dart';
 import 'task_store.dart';
 
 class TasksPage extends StatefulWidget {
-  const TasksPage({super.key, required this.store});
+  const TasksPage({
+    super.key,
+    required this.store,
+    this.agent = const TaskAgent(),
+  });
   final TaskStore store;
+  final TaskAgent agent;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
 }
 
 class _TasksPageState extends State<TasksPage> {
-  final agent = TaskAgent();
+  TaskAgent get agent => widget.agent;
   String query = '';
   bool busy = false;
   bool readyOnly = false;
@@ -25,7 +32,9 @@ class _TasksPageState extends State<TasksPage> {
       await action();
     } catch (error) {
       if (mounted) {
-        final label = error is StateError
+        final label = error is ApiFailure
+            ? error.message
+            : error is StateError
             ? error.message
             : 'Could not complete the request. Try again.';
         ScaffoldMessenger.of(context)
@@ -349,6 +358,10 @@ class _TasksPageState extends State<TasksPage> {
         appBar: AppBar(title: const Text('Planify · Tasks')),
         body: _TaskLayout(
           children: [
+            _DailyHeader(
+              ready: store.inbox.where(store.ready).length,
+              completed: store.inbox.where(store.completed).length,
+            ),
             if (busy) const LinearProgressIndicator(),
             TextField(
               onChanged: (value) =>
@@ -660,4 +673,54 @@ class _StepsEditorState extends State<_StepsEditor> {
       ),
     ],
   );
+}
+
+class _DailyHeader extends StatelessWidget {
+  const _DailyHeader({required this.ready, required this.completed});
+
+  final int ready;
+  final int completed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    final colors = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        color: colors.primaryContainer,
+        gradient: RadialGradient(
+          center: Alignment.topRight,
+          radius: 1.5,
+          colors: dark
+              ? const [Color(0xFF40644D), Color(0xFF223E36)]
+              : const [Color(0xFFF8E8C8), Color(0xFFD9EFE2)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            MaterialLocalizations.of(context).formatFullDate(DateTime.now()),
+            style: theme.textTheme.labelLarge,
+          ),
+          const SizedBox(height: 8),
+          Text('Your tasks', style: theme.textTheme.headlineLarge),
+          const SizedBox(height: 14),
+          AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            child: Text(
+              '$ready ready · $completed complete',
+              key: ValueKey((ready, completed)),
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

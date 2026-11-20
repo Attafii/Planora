@@ -113,7 +113,7 @@ export function registerAssistant(route,dbRoot){
  route('post','/assistant/messages',async(req,db,user)=>{
   const d=parse(z.object({conversation_id:uuid,message:z.string().trim().min(1).max(4000),use_cloud:z.boolean().default(false)}).strict(),req.body);
   const c=await one(db,'SELECT * FROM conversations WHERE id=$1 AND owner_id=$2',[d.conversation_id,user.id]);requireThat(c,'Conversation not found.',404);await context(db,c,user);
-  const result=await answer(db,user,d.message,c,d.use_cloud);
+  const result=await answer(db,user,d.message,c,d.use_cloud && user.cloudAi !== false);
   let p=null;if(result.actions.length)p=await proposal(db,user,{conversationId:c.id,goalId:c.goal_id,title:'Review proposed actions',explanation:result.message,actions:result.actions});
   const time=now();await db.query('INSERT INTO messages(id,conversation_id,role,body,created_at) VALUES($1,$2,$3,$4,$5)',[id(),c.id,'user',d.message,time]);await db.query('INSERT INTO messages(id,conversation_id,role,body,created_at) VALUES($1,$2,$3,$4,$5)',[id(),c.id,'assistant',result.message,new Date(Date.now()+1).toISOString()]);await db.query('UPDATE conversations SET updated_at=$2 WHERE id=$1',[c.id,time]);return {message:result.message,proposal:p};
  });

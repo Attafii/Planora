@@ -66,13 +66,20 @@ class PlanDraft {
 }
 
 class PlanningStore extends ChangeNotifier {
-  PlanningStore(this.storage, this.tasks, {DateTime Function()? now})
-    : _now = now ?? DateTime.now;
+  PlanningStore(
+    this.storage,
+    this.tasks, {
+    DateTime Function()? now,
+    String? accountId,
+  }) : _now = now ?? DateTime.now,
+       _key = accountId == null
+           ? 'planify.planning.v1'
+           : 'planify.planning.v1.$accountId';
 
   final SharedPreferencesAsync storage;
   final TaskStore tasks;
   final DateTime Function() _now;
-  static const _key = 'planify.planning.v1';
+  final String _key;
   Map<String, DayPlan> _days = {};
   Future<void> _pending = Future.value();
 

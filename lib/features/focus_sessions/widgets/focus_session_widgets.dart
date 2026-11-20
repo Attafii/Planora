@@ -569,8 +569,9 @@ class _FocusSessionFormDialogState extends State<FocusSessionFormDialog> {
   void _submit() {
     final title = _titleController.text.trim();
     final minutes = int.tryParse(_minutesController.text.trim());
-    if (title.isEmpty || minutes == null || minutes < 1 || minutes > 1440)
+    if (title.isEmpty || minutes == null || minutes < 1 || minutes > 1440) {
       return;
+    }
     Navigator.pop(context, FocusSessionDraft(title, minutes, _mode));
   }
 }

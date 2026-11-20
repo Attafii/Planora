@@ -26,7 +26,7 @@ function allowed(body, keys) { if (Object.keys(body).some(key => !keys.includes(
 
 function policyFile(path) { return path ? JSON.parse(readFileSync(path, 'utf8')) : null; }
 
-export function createApi({ database = resolve('backend/data/planify.sqlite'), sessionMs = 7 * 86400000, clock = Date.now, activitySource = null, dataPolicy = policyFile(process.env.ACCOUNT_DATA_POLICY_FILE), aiPolicy = policyFile(process.env.INSIGHTS_AI_POLICY_FILE), origins = ['http://localhost:5173', 'http://127.0.0.1:5173'] } = {}) {
+export function createApi({ database = resolve('backend/data/planify.sqlite'), sessionMs = 7 * 86400000, clock = Date.now, activitySource = null, workspace = null, proposeAgent = null, dataPolicy = policyFile(process.env.ACCOUNT_DATA_POLICY_FILE), aiPolicy = policyFile(process.env.INSIGHTS_AI_POLICY_FILE), origins = ['http://localhost:5173', 'http://127.0.0.1:5173'] } = {}) {
   if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
   const db = new DatabaseSync(database);
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
@@ -85,7 +85,7 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const origin = req.headers.origin;
     if (origin && origins.includes(origin)) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
     const send = (status, body) => { res.writeHead(status); res.end(JSON.stringify(body)); };
     try {
@@ -95,6 +95,10 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       const url = new URL(req.url, 'http://localhost');
       const path = url.pathname;
       if (path === '/health' && req.method === 'GET') return send(200, { status: 'ok' });
+      if (workspace && /^\/(goals|tasks|projects|invitations|assistant|gamification|achievements|challenges|integrations)(\/|$)/.test(path)) {
+        const profile = path.startsWith('/integrations/') ? null : user(identity(req).id);
+        return workspace(req, res, profile);
+      }
       if (path.startsWith('/auth/') && req.method === 'POST') rateLimit(req);
       let body = {};
       if (['POST', 'PATCH', 'DELETE'].includes(req.method)) {
@@ -103,6 +107,11 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
         for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 16384) throw new ApiError(413, 'too_large', 'Request is too large.'); }
         try { body = JSON.parse(raw || '{}'); } catch { throw new ApiError(400, 'json', 'Invalid JSON.'); }
         if (!body || Array.isArray(body) || typeof body !== 'object') fail('Expected an object.');
+      }
+      if (proposeAgent && req.method === 'POST' && ['/agents/tasks', '/agents/planning', '/agents/focus'].includes(path)) {
+        const profile = user(identity(req).id);
+        rateLimit(req);
+        return send(200, await proposeAgent(path, body, profile));
       }
       if (path === '/auth/register' && req.method === 'POST') {
         allowed(body, ['name','email','password','timezone','language']);

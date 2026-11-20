@@ -173,9 +173,11 @@ class _AchievementsPageState extends State<AchievementsPage> {
               message: 'Complete meaningful work. Your achievements will update from confirmed activity.',
             ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Focus and planning badges use verified events from the shared Focus and Calendar services.',
-            style: TextStyle(color: AppColors.muted),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -195,7 +197,9 @@ class BadgeMark extends StatelessWidget {
       height: size,
       padding: EdgeInsets.all(size * .2),
       decoration: BoxDecoration(
-        color: earned ? AppColors.ink : AppColors.tint,
+        color: earned
+            ? AppColors.ink
+            : Theme.of(context).colorScheme.secondaryContainer,
         borderRadius: BorderRadius.circular(size * .25),
       ),
       child: Column(
@@ -215,7 +219,7 @@ class BadgeMark extends StatelessWidget {
                           AppColors.blue,
                           AppColors.violet,
                         ][e.key]
-                      : AppColors.muted,
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
                   borderRadius: BorderRadius.circular(size),
                 ),
               ),

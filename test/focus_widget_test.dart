@@ -8,11 +8,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:mobile_project/main.dart';
+import 'package:mobile_project/features/focus_sessions/pages/focus_sessions_page.dart';
 
 void main() {
   testWidgets('creates a focus session from the session form', (tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(const MaterialApp(home: FocusSessionsPage()));
 
     await tester.tap(find.text('Nouvelle session'));
     await tester.pumpAndSettle();

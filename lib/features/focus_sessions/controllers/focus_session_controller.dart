@@ -91,8 +91,9 @@ class FocusSessionController extends ChangeNotifier {
   void startSession(String id) {
     if (_activeSessionId != id && _activeSessionId != null) pauseSession();
     final session = _find(id);
-    if (session == null || session.status == FocusSessionStatus.archived)
+    if (session == null || session.status == FocusSessionStatus.archived) {
       return;
+    }
     _activeSessionId = id;
     _isPomodoroBreak = false;
     _pomodoroSecondsRemaining = 25 * 60;

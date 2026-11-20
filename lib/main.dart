@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tz;
 
-import 'app/theme/account_theme.dart';
+import 'app/account_app.dart';
+import 'app/app_services.dart';
+import 'app/workspace.dart';
+import 'core/network/api_client.dart';
+import 'core/services/app_session.dart' as account;
+
 import 'app/theme/app_theme.dart';
 import 'features/tasks/task_store.dart';
 import 'features/planning/planning_page.dart';
@@ -10,7 +16,65 @@ import 'features/tasks/tasks_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(Planify(store: TaskStore(SharedPreferencesAsync())));
+  tz.initializeTimeZones();
+  runApp(const PlanifyRoot());
+}
+
+class PlanifyRoot extends StatefulWidget {
+  const PlanifyRoot({super.key});
+
+  @override
+  State<PlanifyRoot> createState() => _PlanifyRootState();
+}
+
+class _PlanifyRootState extends State<PlanifyRoot> {
+  final accountSession = account.AppSession(baseUrl: ApiClient().baseUrl);
+  late final services = AppServices(
+    client: ApiClient(baseUrl: accountSession.baseUrl),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    accountSession.addListener(syncAccount);
+    accountSession.restore();
+  }
+
+  void syncAccount() {
+    final user = accountSession.account;
+    services.api.token = accountSession.accessToken;
+    services.api.onUnauthorized = accountSession.restore;
+    services.session.user = user == null
+        ? null
+        : AuthUser.fromJson({
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'timezone': user.timezone,
+          });
+  }
+
+  @override
+  void dispose() {
+    accountSession.removeListener(syncAccount);
+    accountSession.dispose();
+    services.session.dispose();
+    services.api.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AppScope(
+    services: services,
+    child: PlanifyApp(
+      session: accountSession,
+      services: services,
+      workspace: (_) => Workspace(
+        key: ValueKey(accountSession.account!.id),
+        session: accountSession,
+      ),
+    ),
+  );
 }
 
 class Planify extends StatefulWidget {

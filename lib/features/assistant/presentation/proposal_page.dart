@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
-import '../../../app/theme/app_colors.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../../goals/presentation/goal_detail_page.dart';
@@ -138,9 +137,11 @@ class _ProposalPageState extends State<ProposalPage> {
               ),
             if (p.canApprove) ...[
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Approval applies the selected local product changes together. Rejection changes no tasks, goals or project records.',
-                style: TextStyle(color: AppColors.muted),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 20),
               Wrap(
@@ -168,7 +169,10 @@ class _ProposalPageState extends State<ProposalPage> {
               const Divider(),
               Row(
                 children: [
-                  const Icon(Icons.check_circle_outline, color: AppColors.ink),
+                  Icon(
+                    Icons.check_circle_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
@@ -214,7 +218,10 @@ class _ProposalPageState extends State<ProposalPage> {
             ],
             if (p.error != null) ...[
               const Divider(),
-              Text(p.error!, style: const TextStyle(color: AppColors.error)),
+              Text(
+                p.error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
             if (!p.canApprove && p.status == 'pending')
               const Padding(

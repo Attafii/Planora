@@ -9,7 +9,7 @@ import { registerCollaboration } from './collaboration.mjs';
 import { registerAssistant } from './assistant.mjs';
 import { registerGamification } from './gamification.mjs';
 
-export function createApp(db){
+export function createApp(db, { identify } = {}){
  const app=express();app.disable('x-powered-by');
  const origins=(process.env.CORS_ORIGINS||'http://localhost:5300,http://127.0.0.1:5300,http://localhost:4100,http://127.0.0.1:4100').split(',');
  app.use((req,res,next)=>{
@@ -29,7 +29,7 @@ export function createApp(db){
  });
  const route=(method,url,fn,{public:isPublic=false,status=200,onError}={})=>app[method](url,async(req,res,next)=>{
   let user;
-  try{const result=await db.transaction(async tx=>{user=isPublic?null:await currentUser(req,tx);return fn(req,tx,user);});res.status(status).json(result??{});}
+  try{const result=await db.transaction(async tx=>{user=isPublic?null:await (identify || currentUser)(req,tx);return fn(req,tx,user);});res.status(status).json(result??{});}
   catch(error){try{if(onError)await onError(error,req,user);}catch{/* Preserve the original failure; never expose database internals. */}next(error);}
  });
  route('get','/health',()=>({ok:true,database:db.mode}),{public:true});

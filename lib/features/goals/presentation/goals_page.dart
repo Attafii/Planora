@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
-import '../../../app/theme/app_colors.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../models/goal.dart';
 import 'goal_editor.dart';
@@ -150,7 +149,11 @@ class _GoalsPageState extends State<GoalsPage> {
                           g.description,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.muted),
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
                         ),
                       ],
                       const SizedBox(height: 18),

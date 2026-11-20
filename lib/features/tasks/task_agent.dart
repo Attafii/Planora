@@ -1,3 +1,5 @@
+import '../../core/services/app_session.dart';
+
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -5,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'task_store.dart';
 
 class TaskAgent {
+  const TaskAgent({this.session});
+  final AppSession? session;
   static const _url = String.fromEnvironment(
     'TASK_AI_URL',
     defaultValue: 'http://localhost:5141',
@@ -14,6 +18,10 @@ class TaskAgent {
     String kind,
     Map<String, Object?> input,
   ) async {
+    final account = session;
+    if (account != null) {
+      return account.request('POST', '/agents/tasks', {'kind': kind, ...input});
+    }
     final response = await http
         .post(
           Uri.parse('$_url/propose'),

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
-import '../../../app/theme/app_colors.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../models/conversation.dart';
 import 'proposal_page.dart';
@@ -157,19 +156,29 @@ class _ChatPageState extends State<ChatPage> {
                                   padding: const EdgeInsets.all(18),
                                   decoration: BoxDecoration(
                                     color: m.role == 'user'
-                                        ? AppColors.ink
-                                        : AppColors.surface,
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context)
+                                              .colorScheme
+                                              .surfaceContainerLow,
                                     borderRadius: BorderRadius.circular(16),
                                     border: m.role == 'user'
                                         ? null
-                                        : Border.all(color: AppColors.border),
+                                        : Border.all(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .outlineVariant,
+                                          ),
                                   ),
                                   child: SelectableText(
                                     m.body,
                                     style: TextStyle(
                                       color: m.role == 'user'
-                                          ? Colors.white
-                                          : AppColors.ink,
+                                          ? Theme.of(context)
+                                                .colorScheme
+                                                .onPrimary
+                                          : Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
                                       height: 1.5,
                                     ),
                                   ),
@@ -248,7 +257,9 @@ class _ChatPageState extends State<ChatPage> {
                           children: [
                             Text(
                               _sendError!,
-                              style: const TextStyle(color: AppColors.error),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
                             ),
                             const SizedBox(height: 8),
                             Wrap(
@@ -304,11 +315,14 @@ class _ChatPageState extends State<ChatPage> {
                 ],
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 20),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
               child: Text(
                 'Check proposals before approving. Estimates and suggested steps remain editable.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
             ),
           ],

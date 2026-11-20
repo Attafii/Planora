@@ -7,7 +7,9 @@ void feedback(BuildContext context, String message, {bool error = false}) {
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       content: Text(message),
-      backgroundColor: error ? AppColors.error : AppColors.ink,
+      backgroundColor: error
+          ? Theme.of(context).colorScheme.error
+          : AppColors.ink,
       behavior: SnackBarBehavior.floating,
     ),
   );
@@ -80,7 +82,11 @@ class ProductPage extends StatelessWidget {
                         const SizedBox(height: 8),
                         Text(
                           subtitle!,
-                          style: const TextStyle(color: AppColors.muted),
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ],
@@ -186,7 +192,11 @@ class StateMessage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 42, color: AppColors.muted),
+            Icon(
+              icon,
+              size: 42,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(height: 20),
             Text(
               title,
@@ -197,7 +207,9 @@ class StateMessage extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.muted),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             if (action != null) ...[const SizedBox(height: 20), action!],
           ],
@@ -337,7 +349,7 @@ class PagedViewState<T> extends State<PagedView<T>> {
               if (_error != null)
                 Text(
                   _error.toString(),
-                  style: const TextStyle(color: AppColors.error),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               if (_more || _error != null)
                 Padding(
@@ -365,9 +377,9 @@ class Surface extends StatelessWidget {
   final EdgeInsets padding;
   @override
   Widget build(BuildContext context) => Material(
-    color: AppColors.surface,
+    color: Theme.of(context).colorScheme.surfaceContainerLow,
     shape: RoundedRectangleBorder(
-      side: const BorderSide(color: AppColors.border),
+      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
       borderRadius: BorderRadius.circular(16),
     ),
     clipBehavior: Clip.antiAlias,
@@ -382,7 +394,7 @@ class StatusChip extends StatelessWidget {
   Widget build(BuildContext context) => Chip(
     label: Text(label.replaceAll('_', ' ')),
     visualDensity: VisualDensity.compact,
-    backgroundColor: AppColors.tint,
+    backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
   );
 }
 
@@ -401,7 +413,9 @@ class ProgressMeter extends StatelessWidget {
             Expanded(
               child: Text(
                 label ?? 'Progress',
-                style: const TextStyle(color: AppColors.muted),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             Text(
@@ -416,8 +430,8 @@ class ProgressMeter extends StatelessWidget {
           child: LinearProgressIndicator(
             value: percent / 100,
             minHeight: 6,
-            color: AppColors.teal,
-            backgroundColor: AppColors.tint,
+            color: Theme.of(context).colorScheme.primary,
+            backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
           ),
         ),
       ],

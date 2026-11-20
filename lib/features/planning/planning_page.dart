@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/services/app_session.dart';
+
 import '../../app/theme/planify_brand.dart';
 import '../tasks/task_store.dart';
 import 'calendar_panel.dart';
@@ -10,15 +12,20 @@ import 'planning_engine.dart';
 import 'planning_store.dart';
 
 class PlanningPage extends StatefulWidget {
-  const PlanningPage({super.key, required this.store});
+  const PlanningPage({
+    super.key,
+    required this.store,
+    this.agent = const PlanningAgent(),
+  });
   final PlanningStore store;
+  final PlanningAgent agent;
 
   @override
   State<PlanningPage> createState() => _PlanningPageState();
 }
 
 class _PlanningPageState extends State<PlanningPage> {
-  final agent = PlanningAgent();
+  PlanningAgent get agent => widget.agent;
   String date = dayKey(DateTime.now());
   CalendarView calendarView = CalendarView.month;
   bool busy = false;
@@ -34,7 +41,9 @@ class _PlanningPageState extends State<PlanningPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              e is StateError
+              e is ApiFailure
+                  ? e.message
+                  : e is StateError
                   ? e.message
                   : 'Could not complete the request. Try again.',
             ),
@@ -722,11 +731,12 @@ class _ProposalDialogState extends State<_ProposalDialog> {
     try {
       final result = await widget.agent.explain(widget.draft);
       if (mounted) setState(() => notes = result);
-    } catch (_) {
+    } catch (failure) {
       if (mounted) {
         setState(
-          () => error =
-              'AI explanation unavailable. Planner reasons are shown below.',
+          () => error = failure is ApiFailure
+              ? failure.message
+              : 'AI explanation unavailable. Planner reasons are shown below.',
         );
       }
     } finally {

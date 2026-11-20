@@ -70,9 +70,12 @@ class Task {
 }
 
 class TaskStore extends ChangeNotifier {
-  TaskStore(this._storage);
+  TaskStore(this._storage, {String? accountId})
+    : _key = accountId == null
+          ? 'planify.tasks.v1'
+          : 'planify.tasks.v1.$accountId';
   final SharedPreferencesAsync _storage;
-  static const _key = 'planify.tasks.v1';
+  final String _key;
   Map<String, Task> _saved = {};
   Future<void> _pending = Future.value();
   int _sequence = 0;

@@ -1,3 +1,5 @@
+import '../../core/services/app_session.dart';
+
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -6,12 +8,18 @@ import 'planning_engine.dart';
 import 'planning_store.dart';
 
 class PlanningAgent {
+  const PlanningAgent({this.session});
+  final AppSession? session;
   static const _url = String.fromEnvironment(
     'TASK_AI_URL',
     defaultValue: 'http://localhost:5141',
   );
 
   Future<Map<String, dynamic>> _request(Map<String, Object?> payload) async {
+    final account = session;
+    if (account != null) {
+      return account.request('POST', '/agents/planning', payload);
+    }
     final response = await http
         .post(
           Uri.parse('$_url/planning/propose'),

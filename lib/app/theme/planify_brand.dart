@@ -7,12 +7,15 @@ class PlanifyMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox.square(
     dimension: size,
-    child: const CustomPaint(painter: _MarkPainter()),
+    child: CustomPaint(
+      painter: _MarkPainter(Theme.of(context).brightness == Brightness.dark),
+    ),
   );
 }
 
 class _MarkPainter extends CustomPainter {
-  const _MarkPainter();
+  const _MarkPainter(this.dark);
+  final bool dark;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.scale(size.width / 200, size.height / 200);
@@ -22,8 +25,11 @@ class _MarkPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..strokeWidth = 30
-      ..shader = const LinearGradient(
-        colors: [Color(0xFF0078FF), Color(0xFF00D1B2)],
+      ..shader = LinearGradient(
+        colors: [
+          dark ? const Color(0xFF8EE5B9) : const Color(0xFF21785F),
+          const Color(0xFF46A987),
+        ],
       ).createShader(bounds);
     canvas.drawPath(
       Path()
@@ -40,10 +46,14 @@ class _MarkPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 30
-      ..shader = const LinearGradient(
+      ..shader = LinearGradient(
         begin: Alignment.bottomLeft,
         end: Alignment.topRight,
-        colors: [Color(0xFF8B5CF6), Color(0xFF3B82F6), Color(0xFF00D1B2)],
+        colors: [
+          const Color(0xFFD3965B),
+          const Color(0xFF4CA683),
+          const Color(0xFF75D2A7),
+        ],
       ).createShader(bounds);
     canvas.drawPath(
       Path()
@@ -56,13 +66,13 @@ class _MarkPainter extends CustomPainter {
     canvas.drawCircle(
       const Offset(135, 75),
       19,
-      Paint()..color = const Color(0xFF00C9C4),
+      Paint()..color = const Color(0xFF74C8A0),
     );
     canvas.drawLine(
       const Offset(78, 143),
       const Offset(125, 143),
       Paint()
-        ..color = const Color(0xFF0788FF)
+        ..color = const Color(0xFF389A79)
         ..strokeWidth = 25
         ..strokeCap = StrokeCap.round,
     );
@@ -70,12 +80,13 @@ class _MarkPainter extends CustomPainter {
       const Offset(76, 176),
       const Offset(101, 176),
       Paint()
-        ..color = const Color(0xFF7952FF)
+        ..color = const Color(0xFFD3965B)
         ..strokeWidth = 25
         ..strokeCap = StrokeCap.round,
     );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _MarkPainter oldDelegate) =>
+      dark != oldDelegate.dark;
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
-import '../../../app/theme/app_colors.dart';
 import '../../../core/utils/validators.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../models/goal.dart';
@@ -266,9 +265,11 @@ class LinkedTaskPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 20),
-                const Text(
+                Text(
                   'Task estimates and calendar placement are managed by the shared task and calendar modules.',
-                  style: TextStyle(color: AppColors.muted),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
