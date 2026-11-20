@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -11,16 +12,22 @@ import 'planning_agent.dart';
 import 'planning_engine.dart';
 import 'planning_store.dart';
 
+typedef IntervalInput = ({Minutes interval, String label, BlockKind kind});
+
 class PlanningPage extends StatefulWidget {
   const PlanningPage({
     super.key,
     required this.store,
     this.embedded = false,
     this.agent = const PlanningAgent(),
+    this.initialInterruptionId,
+    this.syncStatus,
   });
   final PlanningStore store;
   final bool embedded;
   final PlanningAgent agent;
+  final String? initialInterruptionId;
+  final Widget? syncStatus;
 
   @override
   State<PlanningPage> createState() => _PlanningPageState();
@@ -28,9 +35,22 @@ class PlanningPage extends StatefulWidget {
 
 class _PlanningPageState extends State<PlanningPage> {
   PlanningAgent get agent => widget.agent;
-  String date = dayKey(DateTime.now());
+  late String date;
+
+  @override
+  void initState() {
+    super.initState();
+    date = dayKey(store.localNow);
+    if (widget.initialInterruptionId case final id?) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) run(() => interrupt(intentId: id));
+      });
+    }
+  }
+
   CalendarView calendarView = CalendarView.month;
   bool busy = false;
+  bool interpreting = false;
   PlanningStore get store => widget.store;
 
   Future<void> run(Future<void> Function() action) async {
@@ -67,61 +87,125 @@ class _PlanningPageState extends State<PlanningPage> {
     if (value != null && mounted) setState(() => date = dayKey(value));
   }
 
-  Future<void> review(PlanDraft draft) async {
-    if (!mounted) return;
-    final approved = await showDialog<bool>(
+  // True means the user wants to edit the request and preview it again.
+  Future<bool> review(PlanDraft draft, {bool canRevise = false}) async {
+    if (!mounted) return false;
+    final action = await showDialog<String>(
       context: context,
-      builder: (_) => _ProposalDialog(draft: draft, store: store, agent: agent),
+      barrierDismissible: false,
+      builder: (_) => _ProposalDialog(
+        draft: draft,
+        store: store,
+        agent: agent,
+        canRevise: canRevise,
+      ),
     );
-    if (approved == true) {
-      await store.approve(draft);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Revision ${store.day(draft.day).version} saved.'),
+    if (action == 'approved' && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Revision ${store.day(draft.day).version} saved on this device.',
           ),
-        );
-      }
+        ),
+      );
+    }
+    return action == 'revise';
+  }
+
+  Future<void> reviewInterval(
+    String title,
+    Minutes initial,
+    PlanDraft Function(IntervalInput) propose, {
+    String? label,
+    BlockKind? kind,
+  }) async {
+    var seed = initial;
+    while (mounted) {
+      PlanDraft? draft;
+      final input = await editInterval(
+        title,
+        seed,
+        label: label,
+        kind: kind,
+        validate: (candidate) => draft = propose(candidate),
+      );
+      if (input == null || !await review(draft!, canRevise: true)) return;
+      seed = input.interval;
+      if (label != null) label = input.label;
+      if (kind != null) kind = input.kind;
     }
   }
 
-  Future<void> editHours() async {
-    final current = store.day(date);
-    final result = await editInterval('Working hours', current.workday);
-    if (result != null) {
-      await review(store.preview(date, workday: result.interval));
-    }
-  }
+  Future<void> editHours() => reviewInterval(
+    'Working hours',
+    store.day(date).workday,
+    (input) => store.preview(date, workday: input.interval),
+  );
 
-  Future<void> editReserved([PlanBlock? block]) async {
+  Future<void> editReserved([PlanBlock? block]) {
     final start = math.min(1439, math.max(540, store.cutoffFor(date)));
-    final result = await editInterval(
-      'Add event',
-      block?.interval ?? (start: start, end: math.min(start + 30, 1440)),
-      label: block?.title ?? '',
-      kind: block?.kind ?? BlockKind.commitment,
-    );
-    if (result == null) return;
-    final now = store.cutoffFor(date);
-    if (result.interval.start < now) {
-      throw StateError('Reserve a time from now onward.');
-    }
     final id = block?.id ?? 'event-${DateTime.now().microsecondsSinceEpoch}';
-    await review(
-      store.preview(
+    return reviewInterval(
+      block == null ? 'Add event' : 'Edit event',
+      block?.interval ?? (start: start, end: math.min(start + 30, 1440)),
+      (input) => store.preview(
         date,
         reservedOverride: [
           ...store.day(date).reserved.where((item) => item.id != id),
           PlanBlock(
             id,
-            result.label,
-            result.interval.start,
-            result.interval.end,
-            result.kind,
+            input.label,
+            input.interval.start,
+            input.interval.end,
+            input.kind,
           ),
         ],
       ),
+      label: block?.title ?? '',
+      kind: block?.kind ?? BlockKind.commitment,
     );
+  }
+
+  Future<void> generate() async {
+    await review(store.preview(date));
+  }
+
+  Future<void> taskWindow() async {
+    final candidates = store.candidatesFor(date);
+    if (candidates.isEmpty) {
+      throw StateError(
+        'There are no unfinished tasks to constrain on this date.',
+      );
+    }
+    final selection = await showDialog<PlanningTask>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Choose a task for a time window'),
+        children: [
+          for (final task in candidates)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, task),
+              child: Text('${task.title} · ${task.minutes} min'),
+            ),
+        ],
+      ),
+    );
+    if (selection == null || !mounted) return;
+    await editWindow(selection);
+  }
+
+  Future<void> editWindow(PlanningTask task) => reviewInterval(
+    'Time window for ${task.title}',
+    store.day(date).windows[task.id] ?? store.day(date).workday,
+    (input) => store.preview(
+      date,
+      windowsOverride: {...store.day(date).windows, task.id: input.interval},
+    ),
+  );
+
+  Future<void> clearWindow(String id) async {
+    final next = {...store.day(date).windows}..remove(id);
+    await review(store.preview(date, windowsOverride: next));
   }
 
   Future<void> removeReserved(PlanBlock block) async {
@@ -154,34 +238,34 @@ class _PlanningPageState extends State<PlanningPage> {
     }
   }
 
-  Future<void> interrupt() async {
+  Future<void> interrupt({String? intentId}) {
     final start = math.min(
       1439,
       math.max(store.cutoffFor(date), store.day(date).workday.start),
     );
-    final result = await editInterval('Report interruption', (
-      start: start,
-      end: math.min(start + 30, 1440),
-    ));
-    if (result == null) return;
-    final time = result.interval;
-    await review(
-      store.preview(
-        date,
-        interruption: (
-          id: 'interruption-$date-${time.start}-${time.end}',
-          start: time.start,
-          end: time.end,
-        ),
-      ),
+    return reviewInterval(
+      'Report interruption',
+      (start: start, end: math.min(start + 30, 1440)),
+      (input) {
+        final time = input.interval;
+        return store.preview(
+          date,
+          interruption: (
+            id: intentId ?? 'interruption-$date-${time.start}-${time.end}',
+            start: time.start,
+            end: time.end,
+          ),
+        );
+      },
     );
   }
 
-  Future<({Minutes interval, String label, BlockKind kind})?> editInterval(
+  Future<IntervalInput?> editInterval(
     String title,
     Minutes initial, {
     String? label,
     BlockKind? kind,
+    required void Function(IntervalInput) validate,
   }) => showDialog(
     context: context,
     builder: (_) => _IntervalEditor(
@@ -189,21 +273,35 @@ class _PlanningPageState extends State<PlanningPage> {
       interval: initial,
       label: label,
       kind: kind,
+      validate: validate,
     ),
   );
 
   Future<void> interpret() async {
+    if (!agent.cloudAiEnabled) {
+      throw StateError(
+        'Cloud AI is off. Use the calendar forms or enable Cloud AI in Privacy.',
+      );
+    }
     final input = await showDialog<String>(
       context: context,
       builder: (_) => _RequestDialog(date: date),
     );
     if (input == null) return;
-    final result = await agent.interpret(
-      input,
-      date,
-      store.day(date).workday,
-      store.cutoffFor(date),
-    );
+    if (!mounted) return;
+    setState(() => interpreting = true);
+    final ({String kind, Minutes? interval, String? question}) result;
+    try {
+      result = await agent.interpret(
+        input,
+        date,
+        store.day(date).workday,
+        store.cutoffFor(date),
+        timezone: store.clock.zone(),
+      );
+    } finally {
+      if (mounted) setState(() => interpreting = false);
+    }
     if (!mounted) return;
     if (result.question != null) {
       await showDialog<void>(
@@ -222,29 +320,49 @@ class _PlanningPageState extends State<PlanningPage> {
       return;
     }
     final interval = result.interval!;
-    if (result.kind == 'unavailable' &&
-        interval.start < store.cutoffFor(date)) {
-      throw StateError('That time has already started. Request a later time.');
-    }
-    await review(
-      store.preview(
+    final workingHours = result.kind == 'workday';
+    final id = 'constraint-${DateTime.now().microsecondsSinceEpoch}';
+    await reviewInterval(
+      workingHours
+          ? 'Review interpreted working hours'
+          : 'Review interpreted unavailable time',
+      interval,
+      (input) => store.preview(
         date,
-        workday: result.kind == 'workday' ? interval : null,
-        constraint: result.kind == 'unavailable'
-            ? PlanBlock(
-                'constraint-${DateTime.now().microsecondsSinceEpoch}',
+        workday: workingHours ? input.interval : null,
+        constraint: workingHours
+            ? null
+            : PlanBlock(
+                id,
                 'Unavailable',
-                interval.start,
-                interval.end,
+                input.interval.start,
+                input.interval.end,
                 BlockKind.unavailable,
-              )
-            : null,
+              ),
       ),
     );
   }
 
-  void history(DayPlan day) {
+  void externalCalendars() {
     showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('External calendars'),
+        content: const Text(
+          'Calendar import and export are unavailable. Planify needs a configured calendar provider and a connection that grants access to your calendar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> history(DayPlan day) async {
+    final selected = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Revision history'),
@@ -262,10 +380,18 @@ class _PlanningPageState extends State<PlanningPage> {
                         ),
                         subtitle: Text(
                           MaterialLocalizations.of(context).formatMediumDate(
-                            DateTime.parse(entry['time'] as String).toLocal(),
+                            store.clock.local(
+                              DateTime.parse(entry['time'] as String),
+                            ),
                           ),
                         ),
                         children: [
+                          if (entry['snapshot'] != null &&
+                              store.cutoffFor(date) < 1440)
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, entry),
+                              child: const Text('Preview restore'),
+                            ),
                           for (final change in entry['changes'] as List)
                             ListTile(
                               title: Text(
@@ -288,11 +414,16 @@ class _PlanningPageState extends State<PlanningPage> {
         ],
       ),
     );
+    if (selected != null && mounted) {
+      await run(() async {
+        await review(store.restoreRevision(date, selected));
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: store,
+    listenable: Listenable.merge([store, store.tasks, agent.session]),
     builder: (context, _) {
       final current = store.day(date);
       final timeline = [...current.approved, ...current.reserved]
@@ -300,6 +431,7 @@ class _PlanningPageState extends State<PlanningPage> {
       final canEdit = !busy && store.cutoffFor(date) < 1440;
       final calendar = CalendarPanel(
         date: DateTime.parse(date),
+        today: store.localNow,
         view: calendarView,
         enabled: !busy,
         blocksFor: store.calendarEntries,
@@ -320,6 +452,11 @@ class _PlanningPageState extends State<PlanningPage> {
               onPressed: () => history(current),
               icon: const Icon(Icons.history_rounded),
             ),
+            IconButton(
+              tooltip: 'External calendars',
+              onPressed: externalCalendars,
+              icon: const Icon(Icons.link_off_outlined),
+            ),
             const SizedBox(width: 8),
           ],
         ),
@@ -334,7 +471,8 @@ class _PlanningPageState extends State<PlanningPage> {
                 child: ListView(
                   padding: EdgeInsets.all(split ? 24 : 14),
                   children: [
-                    if (busy) const LinearProgressIndicator(),
+                    if (interpreting) const LinearProgressIndicator(),
+                    ?widget.syncStatus,
                     if (split)
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -369,6 +507,10 @@ class _PlanningPageState extends State<PlanningPage> {
     final dateLabel = MaterialLocalizations.of(context)
         .formatFullDate(DateTime.parse(date));
     final scheduled = plan.approved.length;
+    final unscheduled = store.unscheduled(date);
+    final candidates = {
+      for (final task in store.candidatesFor(date)) task.id: task,
+    };
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -377,6 +519,7 @@ class _PlanningPageState extends State<PlanningPage> {
           children: [
             Text('Agenda', style: theme.textTheme.headlineMedium),
             Text(dateLabel, style: theme.textTheme.titleMedium),
+            if (store.clock.zone() case final zone?) Text(zone),
             const SizedBox(height: 8),
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -396,9 +539,7 @@ class _PlanningPageState extends State<PlanningPage> {
               runSpacing: 8,
               children: [
                 FilledButton.icon(
-                  onPressed: editable
-                      ? () => run(() => review(store.preview(date)))
-                      : null,
+                  onPressed: editable ? () => run(generate) : null,
                   icon: const Icon(Icons.auto_fix_high_rounded),
                   label: const Text('Generate schedule'),
                 ),
@@ -408,9 +549,14 @@ class _PlanningPageState extends State<PlanningPage> {
                   label: const Text('Add event'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: editable ? () => run(interrupt) : null,
+                  onPressed: editable ? () => run(() => interrupt()) : null,
                   icon: const Icon(Icons.pause_circle_outline),
                   label: const Text('Report interruption'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: editable ? () => run(taskWindow) : null,
+                  icon: const Icon(Icons.timelapse_outlined),
+                  label: const Text('Task time window'),
                 ),
                 OutlinedButton.icon(
                   onPressed: editable ? () => run(interpret) : null,
@@ -419,6 +565,25 @@ class _PlanningPageState extends State<PlanningPage> {
                 ),
               ],
             ),
+            for (final entry in plan.windows.entries)
+              ListTile(
+                title: Text(
+                  '${candidates[entry.key]?.title ?? store.tasks.get(entry.key)?.title ?? 'Unavailable task'} · Time window',
+                ),
+                subtitle: Text(
+                  intervalLabel(entry.value.start, entry.value.end),
+                ),
+                onTap: editable && candidates.containsKey(entry.key)
+                    ? () => run(() => editWindow(candidates[entry.key]!))
+                    : null,
+                trailing: IconButton(
+                  tooltip: 'Remove task time window',
+                  onPressed: editable
+                      ? () => run(() => clearWindow(entry.key))
+                      : null,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ),
             const Divider(),
             if (scheduled == 0)
               const Padding(
@@ -429,6 +594,16 @@ class _PlanningPageState extends State<PlanningPage> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: buildBlock(context, block, editable),
+              ),
+            const Divider(),
+            Text('Unscheduled tasks', style: theme.textTheme.titleMedium),
+            if (unscheduled.isEmpty) const Text('No unscheduled tasks.'),
+            for (final task in unscheduled)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.schedule_outlined),
+                title: Text(task.title),
+                subtitle: Text(task.reason),
               ),
           ],
         ),
@@ -519,8 +694,10 @@ class _IntervalEditor extends StatefulWidget {
     required this.interval,
     this.label,
     this.kind,
+    required this.validate,
   });
   final String title;
+  final void Function(IntervalInput) validate;
   final Minutes interval;
   final String? label;
   final BlockKind? kind;
@@ -537,6 +714,7 @@ class _IntervalEditorState extends State<_IntervalEditor> {
   late final end = TextEditingController(text: clockLabel(widget.interval.end));
   late final label = TextEditingController(text: widget.label);
   late BlockKind kind = widget.kind ?? BlockKind.commitment;
+  String? error;
 
   int? parse(String input) {
     final match = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(input.trim());
@@ -564,6 +742,11 @@ class _IntervalEditorState extends State<_IntervalEditor> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (error case final message?)
+              Text(
+                message,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             if (widget.label != null) ...[
               TextFormField(
                 controller: label,
@@ -619,13 +802,19 @@ class _IntervalEditorState extends State<_IntervalEditor> {
       ),
       FilledButton(
         onPressed: () {
-          if (form.currentState!.validate()) {
-            Navigator.pop(context, (
-              interval: (start: parse(start.text)!, end: parse(end.text)!),
-              label: label.text.trim(),
-              kind: kind,
-            ));
+          if (!form.currentState!.validate()) return;
+          final input = (
+            interval: (start: parse(start.text)!, end: parse(end.text)!),
+            label: label.text.trim(),
+            kind: kind,
+          );
+          try {
+            widget.validate(input);
+          } on StateError catch (failure) {
+            setState(() => error = failure.message);
+            return;
           }
+          Navigator.pop(context, input);
         },
         child: const Text('Preview'),
       ),
@@ -690,10 +879,12 @@ class _RequestDialogState extends State<_RequestDialog> {
 
 class _ProposalDialog extends StatefulWidget {
   const _ProposalDialog({
+    required this.canRevise,
     required this.draft,
     required this.store,
     required this.agent,
   });
+  final bool canRevise;
   final PlanDraft draft;
   final PlanningStore store;
   final PlanningAgent agent;
@@ -704,10 +895,32 @@ class _ProposalDialog extends StatefulWidget {
 
 class _ProposalDialogState extends State<_ProposalDialog> {
   bool loading = false;
+  bool saving = false;
+  late PlanDraft draft;
+  Timer? clock;
   String? error;
   List<({PlanChange change, String text})> notes = [];
 
+  @override
+  void initState() {
+    super.initState();
+    draft = widget.draft;
+    clock = Timer.periodic(const Duration(seconds: 15), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    clock?.cancel();
+    super.dispose();
+  }
+
   Future<void> explain() async {
+    if (!widget.agent.cloudAiEnabled) {
+      setState(
+        () => error = 'Cloud AI is off. Planner reasons are shown below.',
+      );
+      return;
+    }
     final consent = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -733,8 +946,11 @@ class _ProposalDialogState extends State<_ProposalDialog> {
       error = null;
     });
     try {
-      final result = await widget.agent.explain(widget.draft);
-      if (mounted) setState(() => notes = result);
+      final requested = draft;
+      final result = await widget.agent.explain(requested);
+      if (mounted && identical(draft, requested)) {
+        setState(() => notes = result);
+      }
     } catch (failure) {
       if (mounted) {
         setState(
@@ -748,14 +964,52 @@ class _ProposalDialogState extends State<_ProposalDialog> {
     }
   }
 
+  void recalculate() {
+    try {
+      final updated = widget.store.recalculate(draft);
+      setState(() {
+        draft = updated;
+        notes = [];
+        error = null;
+      });
+    } on StateError catch (failure) {
+      setState(() => error = failure.message);
+    }
+  }
+
+  Future<void> approve() async {
+    setState(() {
+      saving = true;
+      error = null;
+    });
+    try {
+      await widget.store.approve(draft);
+      if (mounted) Navigator.pop(context, 'approved');
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          saving = false;
+          error = failure is StateError ? failure.message : 'Could not save the proposal. The approved plan is still in place. Try again.';
+        });
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
-    final draft = widget.draft;
-    return ListenableBuilder(
-      listenable: Listenable.merge([widget.store, widget.store.tasks]),
-      builder: (context, _) {
-        final stale = widget.store.isStale(draft);
-        return AlertDialog(
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([
+      widget.store,
+      widget.store.tasks,
+      widget.agent.session,
+    ]),
+    builder: (context, _) {
+      final stale = widget.store.isStale(draft);
+      final deferred = draft.result.changes.where(
+        (change) => change.kind == ChangeKind.deferred,
+      );
+      return PopScope(
+        canPop: !saving,
+        child: AlertDialog(
           title: const Text('Review schedule proposal'),
           content: SizedBox(
             width: 620,
@@ -763,20 +1017,36 @@ class _ProposalDialogState extends State<_ProposalDialog> {
               shrinkWrap: true,
               children: [
                 Text('${draft.day} · ${draft.reason}'),
+                if (draft.zone case final zone?) Text(zone),
                 Text(
                   'Working hours ${intervalLabel(draft.workday.start, draft.workday.end)}',
                 ),
+                for (final window in draft.windows.entries)
+                  Text(
+                    '${widget.store.tasks.get(window.key)?.title ?? 'Unavailable task'} · ${intervalLabel(window.value.start, window.value.end)}',
+                  ),
+                if (draft.interruption != null)
+                  const Text(
+                    'Elapsed blocks show planned time. Actual focus time is recorded in Focus.',
+                  ),
                 if (stale)
-                  const Text('This preview is out of date. Generate it again.'),
-                if (loading) const LinearProgressIndicator(),
-                if (error != null) Text(error!),
+                  const Text(
+                    'This preview is out of date. Recalculate to review the latest plan.',
+                  ),
+                if (saving || loading) const LinearProgressIndicator(),
+                if (error case final message?) Text(message),
+                if (notes.isNotEmpty) const Text('Changes highlighted by AI'),
                 for (final row in notes)
                   ListTile(
                     title: Text(row.change.title),
-                    subtitle: Text(row.text),
+                    subtitle: Text(row.change.reason),
                   ),
                 if (draft.result.changes.isEmpty)
                   const Text('No tasks or reserved blocks to schedule.'),
+                if (deferred.isNotEmpty)
+                  Text(
+                    '${deferred.length} task${deferred.length == 1 ? ' has' : 's have'} work that could not be placed.',
+                  ),
                 for (final change in draft.result.changes)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -790,22 +1060,35 @@ class _ProposalDialogState extends State<_ProposalDialog> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context, false),
+              onPressed: saving ? null : () => Navigator.pop(context),
               child: const Text('Discard'),
             ),
+            if (widget.canRevise)
+              TextButton(
+                onPressed: saving
+                    ? null
+                    : () => Navigator.pop(context, 'revise'),
+                child: const Text('Revise'),
+              ),
+            if (stale)
+              TextButton(
+                onPressed: saving ? null : recalculate,
+                child: const Text('Recalculate'),
+              ),
             OutlinedButton(
-              onPressed: loading || draft.result.changes.isEmpty
+              onPressed:
+                  saving || stale || loading || draft.result.changes.isEmpty
                   ? null
                   : explain,
               child: const Text('Explain with AI'),
             ),
             FilledButton(
-              onPressed: stale ? null : () => Navigator.pop(context, true),
-              child: const Text('Approve'),
+              onPressed: saving || stale ? null : approve,
+              child: Text(saving ? 'Saving…' : 'Approve'),
             ),
           ],
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
 }

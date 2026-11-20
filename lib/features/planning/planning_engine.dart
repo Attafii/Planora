@@ -80,6 +80,10 @@ class PlanningEngine {
     Interruption? interruption,
     List<PlanBlock>? previousCommitments,
     int? earliest,
+    List<Minutes> unavailable = const [],
+    Map<String, Minutes> windows = const {},
+    List<PlanBlock> preferred = const [],
+    Set<String> completedIds = const {},
   }) {
     bool overlaps(Minutes a, Minutes b) => a.start < b.end && b.start < a.end;
     final obstacles = [
@@ -93,24 +97,58 @@ class PlanningEngine {
           BlockKind.unavailable,
         ),
     ];
-    final preserved = <PlanBlock>[];
+    final retained = <PlanBlock>[];
     final elapsed = <String, int>{};
-    for (final block in previous) {
-      if (block.start >= cutoff) continue;
-      final end = math.min(block.end, cutoff);
-      preserved.add(
-        PlanBlock(block.id, block.title, block.start, end, block.kind),
-      );
+    final byId = {for (final task in tasks) task.id: task};
+
+    void keep(PlanBlock block, int start, int end) {
+      if (start >= end) return;
+      retained.add(PlanBlock(block.id, block.title, start, end, block.kind));
       elapsed.update(
         block.id,
-        (sum) => sum + end - block.start,
-        ifAbsent: () => end - block.start,
+        (sum) => sum + end - start,
+        ifAbsent: () => end - start,
       );
     }
+
+    for (final block in previous) {
+      final end = math.min(block.end, cutoff);
+      if (interruption == null || completedIds.contains(block.id)) {
+        keep(block, block.start, end);
+      } else {
+        // A report may cover earlier planned time. Keep the slices on either
+        // side of the interruption without crediting the interrupted minutes.
+        keep(block, block.start, math.min(end, interruption.start));
+        keep(block, math.max(block.start, interruption.end), end);
+      }
+      final task = byId[block.id];
+      if (interruption != null && task != null && task.blockers.isEmpty) {
+        final start = math.max(block.start, math.max(cutoff, workday.start));
+        final stop = math.min(
+          block.end,
+          math.min(interruption.start, workday.end),
+        );
+        final interval = (start: start, end: stop);
+        final window = windows[task.id];
+        final remaining = task.minutes - (elapsed[task.id] ?? 0);
+        if (remaining > 0 &&
+            (window == null || (start >= window.start && stop <= window.end)) &&
+            ![
+              ...obstacles.map((item) => item.interval),
+              ...unavailable,
+            ].any((item) => overlaps(interval, item))) {
+          keep(block, start, math.min(stop, start + remaining));
+        }
+      }
+    }
+
     final available = <Minutes>[];
     var cursor = math.max(workday.start, earliest ?? cutoff);
-    final blocked = [...obstacles, ...preserved]
-      ..sort((a, b) => a.start.compareTo(b.start));
+    final blocked = [
+      ...obstacles.map((block) => block.interval),
+      ...retained.map((block) => block.interval),
+      ...unavailable,
+    ]..sort((a, b) => a.start.compareTo(b.start));
     for (final block in blocked) {
       if (block.end <= cursor || block.start >= workday.end) continue;
       if (block.start > cursor) {
@@ -125,7 +163,7 @@ class PlanningEngine {
         final date = (a.due ?? '9999').compareTo(b.due ?? '9999');
         return date == 0 ? a.id.compareTo(b.id) : date;
       });
-    final next = [...preserved];
+    final next = [...retained];
     final deferred = <String, String>{};
     for (final task in priority) {
       final remaining = task.minutes - (elapsed[task.id] ?? 0);
@@ -134,18 +172,38 @@ class PlanningEngine {
         deferred[task.id] = 'Complete ${task.blockers.join(', ')} first.';
         continue;
       }
-      final index = available.indexWhere(
-        (gap) => gap.end - gap.start >= remaining,
-      );
-      if (index < 0) {
-        deferred[task.id] =
-            'Needs $remaining uninterrupted minutes within working hours after commitments and breaks.';
+      final window = windows[task.id] ?? workday;
+      final oldSlots = preferred.where((block) => block.id == task.id);
+      ({int index, int start})? placement;
+      for (final (index, gap) in available.indexed) {
+        final start = math.max(gap.start, window.start);
+        final end = math.min(gap.end, window.end);
+        if (end - start < remaining) continue;
+        placement ??= (index: index, start: start);
+        final old = oldSlots
+            .where(
+              (block) => block.start >= start && block.start + remaining <= end,
+            )
+            .firstOrNull;
+        if (old != null) {
+          placement = (index: index, start: old.start);
+          break;
+        }
+      }
+      if (placement == null) {
+        deferred[task.id] = windows.containsKey(task.id)
+            ? 'Needs $remaining uninterrupted minutes within ${intervalLabel(window.start, window.end)} after commitments and breaks.'
+            : 'Needs $remaining uninterrupted minutes within working hours after commitments and breaks.';
         continue;
       }
-      final gap = available[index];
-      final end = gap.start + remaining;
-      next.add(PlanBlock(task.id, task.title, gap.start, end, BlockKind.task));
-      available[index] = (start: end, end: gap.end);
+      final gap = available[placement.index];
+      final start = placement.start;
+      final end = start + remaining;
+      next.add(PlanBlock(task.id, task.title, start, end, BlockKind.task));
+      available.replaceRange(placement.index, placement.index + 1, [
+        if (gap.start < start) (start: gap.start, end: start),
+        if (end < gap.end) (start: end, end: gap.end),
+      ]);
     }
     next.sort((a, b) => a.start.compareTo(b.start));
     String? describe(List<PlanBlock> items, String id) {

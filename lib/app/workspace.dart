@@ -36,10 +36,33 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   late final accountId = sync.accountId;
   int workspaceVersion = 0;
   late final tasks = TaskStore(storage, accountId: accountId);
-  late final planning = PlanningStore(storage, tasks, accountId: accountId);
+  late final planning = PlanningStore(
+    storage,
+    tasks,
+    accountId: accountId,
+    timezone: () => widget.session.account?.timezone,
+  );
+  PlanningAgent get planningAgent =>
+      PlanningAgent(session: widget.session, accountId: accountId);
   late final focus = FocusStore(
     accountId: accountId,
     storage: storage,
+    onPlanRecovery: (id) {
+      if (!mounted || widget.session.account?.id != accountId) return;
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => PlanningPage(
+            store: planning,
+            agent: planningAgent,
+            initialInterruptionId: id,
+            syncStatus: ListenableBuilder(
+              listenable: sync,
+              builder: (_, _) => syncStatus(),
+            ),
+          ),
+        ),
+      );
+    },
     proposeAgent: (body) {
       if (widget.session.account?.id != accountId) {
         throw const ApiFailure(AppSession.ended, status: 401);
@@ -178,10 +201,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         PlanningPage(
                           store: planning,
                           embedded: true,
-                          agent: PlanningAgent(
-                            session: widget.session,
-                            accountId: accountId,
-                          ),
+                          agent: planningAgent,
                         ),
                         ListenableBuilder(
                           listenable: focus,

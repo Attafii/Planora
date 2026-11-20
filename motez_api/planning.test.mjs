@@ -40,3 +40,18 @@ test('explanation requires real change indexes and avoids alternative clock time
       { items: [item] })), /invalid planning proposal/);
   }
 });
+
+test('planning rejects invalid civil dates and timezone names before calling a provider', async () => {
+  const body = {kind: 'interpret', date: '2026-11-19', input: 'Keep two to three free',
+    cutoff: 600, workday: {start: 540, end: 1020}, timezone: 'Europe/Paris'};
+  const result = {kind: 'unavailable', start: 840, end: 900};
+  const configured = provider('read_planning_context', result);
+  const capturing = async (url, options) => {
+    const tool = JSON.parse(options.body).messages.find(message => message.role === 'tool');
+    if (tool) assert.equal(JSON.parse(tool.content).timezone, 'Europe/Paris');
+    return configured(url, options);
+  };
+  assert.deepEqual(await proposePlanning(body, env, capturing), result);
+  await assert.rejects(proposePlanning({...body, date: '2026-02-30'}, env, capturing), /Invalid planning request/);
+  await assert.rejects(proposePlanning({...body, timezone: 'Mars/Colony'}, env, capturing), /Invalid scheduling context/);
+});
