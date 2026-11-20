@@ -111,10 +111,12 @@ class _WorkspaceState extends State<Workspace> {
                     children: [
                       TasksPage(
                         store: tasks,
+                        embedded: true,
                         agent: TaskAgent(session: widget.session),
                       ),
                       PlanningPage(
                         store: planning,
+                        embedded: true,
                         agent: PlanningAgent(session: widget.session),
                       ),
                       ListenableBuilder(
@@ -199,6 +201,7 @@ class _MorePage extends StatelessWidget {
           const SizedBox(height: 20),
           for (final (icon, title, description, route) in links)
             Card(
+              margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 leading: Icon(icon),
                 title: Text(title),

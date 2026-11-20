@@ -15,9 +15,11 @@ class PlanningPage extends StatefulWidget {
   const PlanningPage({
     super.key,
     required this.store,
+    this.embedded = false,
     this.agent = const PlanningAgent(),
   });
   final PlanningStore store;
+  final bool embedded;
   final PlanningAgent agent;
 
   @override
@@ -308,8 +310,10 @@ class _PlanningPageState extends State<PlanningPage> {
       final agenda = buildAgenda(context, current, timeline, canEdit);
       return Scaffold(
         appBar: AppBar(
-          leading: const Center(child: PlanifyMark(size: 30)),
-          title: const Text('Planify · Calendar'),
+          leading: widget.embedded
+              ? null
+              : const Center(child: PlanifyMark(size: 30)),
+          title: Text(widget.embedded ? 'Calendar' : 'Planify · Calendar'),
           actions: [
             IconButton(
               tooltip: 'Revision history for selected date',

@@ -9,9 +9,11 @@ class TasksPage extends StatefulWidget {
   const TasksPage({
     super.key,
     required this.store,
+    this.embedded = false,
     this.agent = const TaskAgent(),
   });
   final TaskStore store;
+  final bool embedded;
   final TaskAgent agent;
 
   @override
@@ -355,7 +357,9 @@ class _TasksPageState extends State<TasksPage> {
           )
           .toList();
       return Scaffold(
-        appBar: AppBar(title: const Text('Planify · Tasks')),
+        appBar: widget.embedded
+            ? null
+            : AppBar(title: const Text('Planify · Tasks')),
         body: _TaskLayout(
           children: [
             _DailyHeader(

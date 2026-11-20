@@ -45,11 +45,9 @@ class _HomePageState extends State<HomePage> {
       children: [
         Row(
           children: [
-            Image.asset(
-              'assets/branding/identity-source/approved-logo.png',
-              width: 114,
-              height: 42,
-              fit: BoxFit.contain,
+            Text(
+              'Focus overview',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
             const Spacer(),
             IconButton.filledTonal(
