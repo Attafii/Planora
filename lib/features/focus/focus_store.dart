@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/services/notification_service.dart';
+import '../../core/services/personal_sync.dart';
 
 String newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
@@ -117,17 +118,24 @@ class Reminder {
 }
 
 class FocusStore extends ChangeNotifier {
-  FocusStore({String? accountId, this.proposeAgent})
-    : _key = accountId == null
-          ? 'planify.oumayma.v1'
-          : 'planify.oumayma.v1.$accountId';
+  FocusStore({
+    String? accountId,
+    this.proposeAgent,
+    this.onPlanRecovery,
+    SharedPreferencesAsync? storage,
+  }) : _providedStorage = storage,
+       _key = accountId == null
+           ? 'planify.oumayma.v1'
+           : 'planify.oumayma.v1.$accountId';
 
   final String _key;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   proposeAgent;
+  final void Function(String id)? onPlanRecovery;
   bool _disposed = false;
   final notifications = NotificationService();
-  late final _prefs = SharedPreferencesAsync();
+  final SharedPreferencesAsync? _providedStorage;
+  late final _prefs = _providedStorage ?? SharedPreferencesAsync();
   List<FocusSession> sessions = [];
   List<Reminder> reminders = [];
   List<String> inbox = [];
@@ -137,7 +145,41 @@ class FocusStore extends ChangeNotifier {
   Timer? _ticker;
   Future<void> _writes = Future.value();
   FocusSession? get active => sessions.where((s) => !s.finished).firstOrNull;
+  Future<void> get settled => _writes;
+
+  Future<void> clearDeviceAlerts() async {
+    try {
+      await notifications.clearDeviceAlerts();
+    } catch (_) {
+      notifications.message = 'Device alerts could not be cleared.';
+    }
+  }
+
+  Future<void> _scheduleReminder(Reminder reminder) async {
+    final date = DateTime.now();
+    await Future.wait([
+      notifications.schedule(
+        reminder.id,
+        reminder.title,
+        reminder.next(date),
+        reminder.repeat,
+        reminder.enabled,
+      ),
+      notifications.schedule(
+        '${reminder.id}1',
+        reminder.title,
+        reminder.snoozedUntil ?? DateTime(2000),
+        'Once',
+        reminder.enabled,
+      ),
+    ]);
+  }
+
+  void suspend() => _ticker?.cancel();
+
   Future<void> load() async {
+    suspend();
+    error = null;
     try {
       final raw = await _prefs.getString(_key);
       if (raw != null) {
@@ -149,14 +191,29 @@ class FocusStore extends ChangeNotifier {
             .map((e) => Reminder.fromJson(Map<String, dynamic>.from(e)))
             .toList();
         inbox = List<String>.from(j['inbox']);
+      } else {
+        sessions = [];
+        reminders = [];
+        inbox = [];
       }
     } catch (_) {
+      if (_prefs is SyncedPreferences) rethrow;
       error = 'Saved data could not be loaded. Restart before making changes.';
     }
     try {
-      await notifications.init();
+      if (!ready) await notifications.init();
     } catch (_) {
       notifications.message = 'Device notifications could not be initialized.';
+    }
+    if (_disposed) return;
+    if (_prefs is SyncedPreferences && notifications.initialized) {
+      await clearDeviceAlerts();
+      if (_disposed) return;
+      final alert = active?.breakUntil;
+      await Future.wait([
+        for (final reminder in reminders) _scheduleReminder(reminder),
+        if (alert != null) notifications.timer(alert, 'Your break is complete'),
+      ]);
     }
     if (_disposed) return;
     ready = true;
@@ -192,7 +249,7 @@ class FocusStore extends ChangeNotifier {
       Object e,
     ) {
       error = 'Changes could not be saved. Check device storage.';
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     });
     notifyListeners();
   }
@@ -306,28 +363,17 @@ class FocusStore extends ChangeNotifier {
       reminders[i] = r;
     }
     save();
-    await notifications.schedule(
-      r.id,
-      r.title,
-      r.next(DateTime.now()),
-      r.repeat,
-      r.enabled,
-    );
-    await notifications.schedule(
-      '${r.id}1',
-      r.title,
-      r.snoozedUntil ?? DateTime(2000),
-      'Once',
-      r.enabled,
-    );
-    notifyListeners();
+    await _scheduleReminder(r);
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> deleteReminder(Reminder r) async {
     reminders.removeWhere((x) => x.id == r.id);
     save();
-    await notifications.cancel(r.id);
-    await notifications.cancel('${r.id}1');
+    await Future.wait([
+      notifications.cancel(r.id),
+      notifications.cancel('${r.id}1'),
+    ]);
   }
 
   Future<void> snooze(Reminder r) async {

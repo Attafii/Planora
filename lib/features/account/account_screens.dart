@@ -303,6 +303,16 @@ class _AuthScreenState extends State<AuthScreen> {
                               child: const Text('Forgot password?'),
                             ),
                           ),
+                        if (widget.session.sessionMessage case final message?)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Notice(text: message),
+                          ),
+                        if (widget.session.secureClearFailed)
+                          TextButton(
+                            onPressed: widget.session.retryLocalSignOut,
+                            child: const Text('Retry local sign-out'),
+                          ),
                         if (error != null)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 16),
@@ -748,29 +758,8 @@ class _AccountShellState extends State<AccountShell> {
                               ? null
                               : () async {
                                   setState(() => signingOut = true);
-                                  final messenger = ScaffoldMessenger.of(
-                                    context,
-                                  );
                                   try {
-                                    final revoked = await widget.session
-                                        .signOut();
-                                    if (!revoked) {
-                                      messenger.showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Signed out on this device. The server session could not be revoked and will expire automatically.',
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  } catch (_) {
-                                    messenger.showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Secure storage could not be cleared. Please clear this app’s device data before leaving a shared device.',
-                                        ),
-                                      ),
-                                    );
+                                    await widget.session.signOut();
                                   } finally {
                                     if (mounted) {
                                       setState(() => signingOut = false);
@@ -1240,12 +1229,94 @@ class PreferencesPage extends StatefulWidget {
 }
 
 class _PreferencesPageState extends State<PreferencesPage> {
-  late String timezone = widget.session.account!.timezone,
-      language = widget.session.account!.language,
-      theme = widget.session.account!.theme;
+  late String timezone = baseline.timezone,
+      language = baseline.language,
+      theme = baseline.theme;
+  late Account baseline = widget.session.account!;
+  bool timezoneSelected = false;
   bool busy = false;
   String? error;
   bool saved = false;
+  int formRevision = 0;
+  bool conflict = false;
+  bool reviewedConflict = false;
+
+  Map<String, String> get changes => {
+    if (timezoneSelected || timezone != baseline.timezone) 'timezone': timezone,
+    if (language != baseline.language) 'language': language,
+    if (theme != baseline.theme) 'theme': theme,
+  };
+
+  Future<void> save() async {
+    setState(() {
+      busy = true;
+      error = null;
+      saved = false;
+    });
+    final values = changes;
+    // Submitting the default timezone also confirms it for profile setup.
+    if (values.isEmpty) values['timezone'] = timezone;
+    try {
+      await widget.session.savePreferences({
+        ...values,
+        'expected': {
+          if (values.containsKey('timezone')) 'timezone': baseline.timezone,
+          if (values.containsKey('language')) 'language': baseline.language,
+          if (values.containsKey('theme')) 'theme': baseline.theme,
+        },
+      });
+      if (!mounted) return;
+      setState(() {
+        baseline = widget.session.account!;
+        timezone = baseline.timezone;
+        language = baseline.language;
+        theme = baseline.theme;
+        timezoneSelected = false;
+        conflict = false;
+        reviewedConflict = false;
+        formRevision++;
+        saved = true;
+      });
+    } on ApiFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        conflict = failure.status == 409;
+        error = switch (failure.status) {
+          0 => 'Connect to Planify to save preferences. Your selections are still here.',
+          409 => 'These settings changed on another device. Review the saved settings before applying your selections.',
+          _ => failure.message,
+        };
+      });
+    } catch (failure) {
+      if (mounted) setState(() => error = failure.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> reviewSavedPreferences() async {
+    final draft = changes;
+    setState(() => busy = true);
+    try {
+      await widget.session.refreshAccount();
+      if (!mounted) return;
+      setState(() {
+        baseline = widget.session.account!;
+        timezone = draft['timezone'] ?? baseline.timezone;
+        language = draft['language'] ?? baseline.language;
+        theme = draft['theme'] ?? baseline.theme;
+        formRevision++;
+        conflict = false;
+        reviewedConflict = true;
+        error = null;
+      });
+    } catch (failure) {
+      if (mounted) setState(() => error = failure.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final locations = tz.timeZoneDatabase.locations.keys.toList()..sort();
@@ -1276,6 +1347,7 @@ class _PreferencesPageState extends State<PreferencesPage> {
                 ),
                 const SizedBox(height: 24),
                 DropdownMenu<String>(
+                  key: ValueKey(('timezone', formRevision)),
                   initialSelection: timezone,
                   expandedInsets: EdgeInsets.zero,
                   enableFilter: true,
@@ -1290,6 +1362,7 @@ class _PreferencesPageState extends State<PreferencesPage> {
                           if (v != null) {
                             setState(() {
                               timezone = v;
+                              timezoneSelected = true;
                               saved = false;
                             });
                           }
@@ -1306,6 +1379,7 @@ class _PreferencesPageState extends State<PreferencesPage> {
                 ),
                 const SizedBox(height: 26),
                 DropdownButtonFormField<String>(
+                  key: ValueKey(('language', formRevision)),
                   initialValue: language,
                   decoration: InputDecoration(
                     labelText: tr(context, 'Language', 'Langue'),
@@ -1359,14 +1433,23 @@ class _PreferencesPageState extends State<PreferencesPage> {
                 Notice(
                   text: tr(
                     context,
-                    'Notification delivery is not connected yet. There are no notification settings to configure.',
-                    'Le service de notifications n’est pas encore connecté. Aucun réglage n’est disponible.',
+                    'Manage reminder alerts in Focus. Notification permissions apply to each device.',
+                    'Gérez les alertes de rappel dans Focus. Les autorisations s’appliquent à chaque appareil.',
                   ),
                 ),
                 if (error != null) ...[
                   const SizedBox(height: 20),
                   Notice(text: error!, isError: true),
+                  if (conflict)
+                    TextButton(
+                      onPressed: busy ? null : reviewSavedPreferences,
+                      child: const Text('Review saved settings'),
+                    ),
                 ],
+                if (reviewedConflict)
+                  Text(
+                    'Saved settings: ${baseline.timezone} · ${baseline.language} · ${baseline.theme}. Your choices are shown above.',
+                  ),
                 if (saved) ...[
                   const SizedBox(height: 20),
                   Notice(
@@ -1382,30 +1465,12 @@ class _PreferencesPageState extends State<PreferencesPage> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: FilledButton(
-                    onPressed: busy
-                        ? null
-                        : () async {
-                            setState(() {
-                              busy = true;
-                              error = null;
-                              saved = false;
-                            });
-                            try {
-                              await widget.session.savePreferences({
-                                'timezone': timezone,
-                                'language': language,
-                                'theme': theme,
-                              });
-                              if (mounted) setState(() => saved = true);
-                            } catch (e) {
-                              if (mounted) setState(() => error = e.toString());
-                            } finally {
-                              if (mounted) setState(() => busy = false);
-                            }
-                          },
+                    onPressed: busy || conflict ? null : save,
                     child: Text(
                       busy
                           ? tr(context, 'Saving…', 'Enregistrement…')
+                          : reviewedConflict
+                          ? 'Apply my choices'
                           : tr(context, 'Save preferences', 'Enregistrer'),
                     ),
                   ),

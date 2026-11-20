@@ -31,7 +31,7 @@ class TodayPage extends StatefulWidget {
 }
 
 class _TodayPageState extends State<TodayPage> {
-  DateTime now = DateTime.now();
+  late DateTime now = widget.planning.localNow;
   Timer? timer;
   static const moods = ['Low', 'Quiet', 'Steady', 'Good', 'Great'];
   String? mood;
@@ -46,7 +46,7 @@ class _TodayPageState extends State<TodayPage> {
     publishWidget();
     timer = Timer.periodic(const Duration(minutes: 1), (_) {
       final previous = dayKey(now);
-      setState(() => now = DateTime.now());
+      setState(() => now = widget.planning.localNow);
       if (previous != dayKey(now)) {
         publishWidget();
         mood = null;

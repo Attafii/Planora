@@ -89,3 +89,38 @@ test('SQLite survives API restart without storing raw tokens or passwords',async
   const second=await fixture({database});t.after(async()=>{await second.close();const contents=readFileSync(database);assert.equal(contents.includes(Buffer.from(token)),false);assert.equal(contents.includes(Buffer.from(credentials().password)),false);for(const file of readdirSync(folder))unlinkSync(join(folder,file));rmdirSync(folder);});
   const profile=await second.call('/users/me','GET',undefined,token);assert.equal(profile.status,200);assert.equal(profile.data.language,'fr');
 });
+
+test('personal collections use account revisions and support retry after a lost response', async t => {
+  const f = await fixture();
+  t.after(f.close);
+  const a = (await f.call('/auth/register', 'POST', credentials())).data;
+  const b = (await f.call('/auth/register', 'POST', credentials('other@example.com'))).data;
+  const device = (await f.call('/auth/login', 'POST', {
+    email: a.user.email, password: credentials().password,
+  })).data;
+  const root = '/users/me/sync';
+  const snapshot = JSON.stringify([{ id: 'one', title: 'Préparer la journée' }]);
+  const write = (token, revision, snapshot) => f.call(root + '/tasks', 'POST', { revision, snapshot }, token);
+  const first = await write(a.token, 0, snapshot);
+  assert.deepEqual(first, { status: 200, data: { applied: true, revision: 1, snapshot } });
+  assert.deepEqual(await write(a.token, 0, snapshot), first);
+  const conflicting = '[]';
+  assert.deepEqual((await write(device.token, 0, conflicting)).data, { applied: false, revision: 1, snapshot });
+  assert.deepEqual((await f.call(root, 'GET', undefined, device.token)).data.collections.tasks, { revision: 1, snapshot });
+  assert.deepEqual((await f.call(root, 'GET', undefined, b.token)).data.collections, {});
+  assert.equal((await write(b.token, 0, '{"bad":1}')).status, 422);
+  assert.equal((await f.call(root)).status, 401);
+  assert.equal((await write(device.token, 1, conflicting)).data.revision, 2);
+  assert.equal((await write(a.token, 0, snapshot)).data.applied, false);
+});
+
+test('preferences compare original values only for touched fields', async t => {
+  const f = await fixture();
+  t.after(f.close);
+  const {token} = (await f.call('/auth/register','POST',credentials())).data;
+  const patch = changes => f.call('/users/me/preferences', 'PATCH', changes, token);
+  assert.equal((await patch({ theme: 'dark', expected: { theme: 'system' } })).status, 200);
+  assert.equal((await patch({ language: 'fr', expected: { language: 'en' } })).data.preferences.theme, 'dark');
+  assert.equal((await patch({ theme: 'light', expected: { theme: 'system' } })).status, 409);
+  assert.equal((await patch({ theme: 'dark', expected: { theme: 'system' } })).status, 200);
+});

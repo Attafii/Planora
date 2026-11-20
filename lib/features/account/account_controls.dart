@@ -712,17 +712,7 @@ class _SecurityPageState extends State<SecurityPage> {
                             );
                             if (!confirmed || !context.mounted) return;
                             if (s['current'] == true) {
-                              final messenger = ScaffoldMessenger.of(context);
-                              final revoked = await session.signOut();
-                              if (!revoked) {
-                                messenger.showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Signed out here. The server session could not be revoked and will expire automatically.',
-                                    ),
-                                  ),
-                                );
-                              }
+                              await session.signOut();
                             } else {
                               await session.request(
                                 'DELETE',

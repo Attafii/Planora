@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'package:flutter/services.dart';
+
 import 'package:flutter/material.dart';
 
 import 'today_page.dart';
@@ -10,6 +12,7 @@ import '../features/account/account_screens.dart';
 import '../features/tasks/task_agent.dart';
 import '../features/planning/planning_agent.dart';
 import '../core/services/app_session.dart';
+import '../core/services/personal_sync.dart';
 import '../features/assistant/presentation/conversations_page.dart';
 import '../features/focus/focus_store.dart';
 import 'focus_app.dart' show MobileShell;
@@ -27,18 +30,45 @@ class Workspace extends StatefulWidget {
   State<Workspace> createState() => _WorkspaceState();
 }
 
-class _WorkspaceState extends State<Workspace> {
-  final storage = SharedPreferencesAsync();
-  late final tasks = TaskStore(storage, accountId: widget.session.account!.id);
+class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
+  late final sync = PersonalSync(widget.session, SharedPreferencesAsync());
+  late final storage = SyncedPreferences(sync);
+  late final accountId = sync.accountId;
+  int workspaceVersion = 0;
+  late final tasks = TaskStore(storage, accountId: accountId);
   late final planning = PlanningStore(
     storage,
     tasks,
-    accountId: widget.session.account!.id,
+    accountId: accountId,
+    timezone: () => widget.session.account?.timezone,
   );
+  PlanningAgent get planningAgent =>
+      PlanningAgent(session: widget.session, accountId: accountId);
   late final focus = FocusStore(
-    accountId: widget.session.account!.id,
-    proposeAgent: (body) =>
-        widget.session.request('POST', '/agents/focus', body),
+    accountId: accountId,
+    storage: storage,
+    onPlanRecovery: (id) {
+      if (!mounted || widget.session.account?.id != accountId) return;
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => PlanningPage(
+            store: planning,
+            agent: planningAgent,
+            initialInterruptionId: id,
+            syncStatus: ListenableBuilder(
+              listenable: sync,
+              builder: (_, _) => syncStatus(),
+            ),
+          ),
+        ),
+      );
+    },
+    proposeAgent: (body) {
+      if (widget.session.account?.id != accountId) {
+        throw const ApiFailure(AppSession.ended, status: 401);
+      }
+      return widget.session.request('POST', '/agents/focus', body);
+    },
   );
   late Future<void> ready = load();
   int selected = 0;
@@ -51,13 +81,33 @@ class _WorkspaceState extends State<Workspace> {
     (Icons.more_horiz, 'More'),
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) sync.sync();
+  }
+
   Future<void> load() async {
+    await sync.open();
+    await reloadStores();
+  }
+
+  Future<void> reloadStores() async {
+    if (!mounted) return;
     await tasks.load();
     await Future.wait([planning.load(), focus.load()]);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (widget.session.account?.id != accountId) focus.clearDeviceAlerts();
+    sync.dispose();
     planning.dispose();
     focus.dispose();
     tasks.dispose();
@@ -70,6 +120,18 @@ class _WorkspaceState extends State<Workspace> {
       appBar: AppBar(
         title: const Brand(),
         actions: [
+          ListenableBuilder(
+            listenable: sync,
+            builder: (_, _) => IconButton(
+              tooltip: 'Personal data sync',
+              onPressed: showSync,
+              icon: Icon(
+                sync.offline || sync.error != null || sync.updates.isNotEmpty
+                    ? Icons.sync_problem
+                    : Icons.sync,
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Account and preferences',
             onPressed: () => Navigator.pushNamed(context, '/account'),
@@ -80,61 +142,81 @@ class _WorkspaceState extends State<Workspace> {
       ),
       body: SafeArea(
         bottom: false,
-        child: FutureBuilder<void>(
-          future: ready,
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return Center(
-                child: FilledButton(
-                  onPressed: () => setState(() => ready = load()),
-                  child: const Text('Could not load your workspace. Retry'),
-                ),
-              );
-            }
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: selected == 0
-                    ? 0
-                    : MediaQuery.paddingOf(context).bottom,
-              ),
-              child: IndexedStack(
-                index: selected,
-                children: [
-                  TodayPage(
-                    tasks: tasks,
-                    planning: planning,
-                    storage: storage,
-                    accountId: widget.session.account!.id,
-                    onCalendar: () => select(1),
-                    onTasks: () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => TasksPage(
-                          store: tasks,
-                          agent: TaskAgent(session: widget.session),
+        child: Column(
+          children: [
+            ListenableBuilder(
+              listenable: sync,
+              builder: (_, _) => syncStatus(),
+            ),
+            Expanded(
+              child: FutureBuilder<void>(
+                future: ready,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(
+                      child: FilledButton(
+                        onPressed: () => setState(() => ready = load()),
+                        child: const Text(
+                          'Could not load your workspace. Retry',
                         ),
                       ),
+                    );
+                  }
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      bottom: selected == 0
+                          ? 0
+                          : MediaQuery.paddingOf(context).bottom,
                     ),
-                  ),
-                  PlanningPage(
-                    store: planning,
-                    embedded: true,
-                    agent: PlanningAgent(session: widget.session),
-                  ),
-                  ListenableBuilder(
-                    listenable: focus,
-                    builder: (_, _) =>
-                        MobileShell(store: focus, embedded: true),
-                  ),
-                  const ConversationsPage(embedded: true),
-                  const _MorePage(),
-                ],
+                    child: IndexedStack(
+                      index: selected,
+                      children: [
+                        TodayPage(
+                          key: ValueKey(workspaceVersion),
+                          tasks: tasks,
+                          planning: planning,
+                          storage: storage,
+                          accountId: accountId,
+                          onCalendar: () => select(1),
+                          onTasks: () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => TasksPage(
+                                syncStatus: ListenableBuilder(
+                                  listenable: sync,
+                                  builder: (_, _) => syncStatus(),
+                                ),
+                                store: tasks,
+                                agent: TaskAgent(
+                                  session: widget.session,
+                                  accountId: accountId,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        PlanningPage(
+                          store: planning,
+                          embedded: true,
+                          agent: planningAgent,
+                        ),
+                        ListenableBuilder(
+                          listenable: focus,
+                          builder: (_, _) =>
+                              MobileShell(store: focus, embedded: true),
+                        ),
+                        const ConversationsPage(embedded: true),
+                        const _MorePage(),
+                      ],
+                    ),
+                  );
+                },
               ),
-            );
-          },
+            ),
+          ],
         ),
       ),
       extendBody: true,
@@ -197,6 +279,184 @@ class _WorkspaceState extends State<Workspace> {
       ),
     );
   }
+
+  String get syncMessage {
+    if (sync.syncing) return 'Syncing personal data…';
+    if (sync.offline) {
+      return sync.pending
+          ? 'Offline. Changes saved on this device.'
+          : 'Offline. Showing data saved on this device.';
+    }
+    if (sync.error != null) {
+      return 'Sync failed. Device data is still available.';
+    }
+    if (sync.updates.values.contains(true)) {
+      return 'Review changes from another device.';
+    }
+    if (sync.updates.isNotEmpty) {
+      return 'Updates are available from another device.';
+    }
+    if (sync.pending) return 'Changes saved on this device. Waiting to sync.';
+    return sync.synced ? 'Personal data is up to date' : 'Waiting to connect';
+  }
+
+  Widget syncStatus() {
+    if (!sync.offline &&
+        sync.error == null &&
+        !sync.pending &&
+        sync.updates.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return ListTile(
+      dense: true,
+      title: Text(syncMessage),
+      trailing: TextButton(
+        onPressed: sync.updates.isEmpty ? sync.sync : showSync,
+        child: Text(sync.updates.isEmpty ? 'Retry' : 'Review'),
+      ),
+    );
+  }
+
+  Future<void> showSync() => showDialog<void>(
+    context: context,
+    builder: (dialog) => ListenableBuilder(
+      listenable: sync,
+      builder: (_, _) => AlertDialog(
+        title: const Text('Personal data sync'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(syncMessage),
+              if (sync.error case final message?) Text(message),
+              for (final entry in sync.updates.entries)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(PersonalSync.labels[entry.key]!),
+                  subtitle: Text(
+                    entry.value
+                        ? 'Both devices changed this collection.'
+                        : 'A newer version is available.',
+                  ),
+                  onTap: () => chooseVersion(dialog, entry.key, entry.value),
+                ),
+              for (final entry in PersonalSync.labels.entries)
+                if (sync.versions(entry.key).isNotEmpty)
+                  TextButton(
+                    onPressed: () => showVersions(dialog, entry.key),
+                    child: Text('Saved versions · ${entry.value}'),
+                  ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: sync.syncing ? null : sync.sync,
+            child: const Text('Sync now'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Future<void> chooseVersion(
+    BuildContext dialog,
+    String collection,
+    bool conflict,
+  ) async {
+    final keepLocal = await showDialog<bool>(
+      context: dialog,
+      builder: (choice) => AlertDialog(
+        title: Text(PersonalSync.labels[collection]!),
+        content: Text(
+          conflict
+              ? 'Choose the version to use. Planify saves a copy of the other version on this device.'
+              : 'Load the version saved by your other device?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(choice),
+            child: const Text('Cancel'),
+          ),
+          if (conflict)
+            TextButton(
+              onPressed: () => Navigator.pop(choice, true),
+              child: const Text('Keep this device'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(choice, false),
+            child: const Text('Use other device'),
+          ),
+        ],
+      ),
+    );
+    if (keepLocal == null || !mounted || !dialog.mounted) return;
+    Navigator.pop(dialog);
+    focus.suspend();
+    setState(() => ready = applyVersion(collection, keepLocal));
+  }
+
+  Future<void> applyVersion(String collection, bool keepLocal) async {
+    await Future.wait([tasks.settled, planning.settled, focus.settled]);
+    if (!mounted) return;
+    try {
+      await sync.resolve(collection, keepLocal: keepLocal);
+      workspaceVersion++;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not switch versions. Please retry.'),
+          ),
+        );
+      }
+    }
+    await reloadStores();
+  }
+
+  Future<void> showVersions(
+    BuildContext dialog,
+    String collection,
+  ) => showDialog<void>(
+    context: dialog,
+    builder: (context) => AlertDialog(
+      title: Text('Saved versions · ${PersonalSync.labels[collection]}'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (index, snapshot) in sync.versions(collection).indexed)
+              ListTile(
+                title: Text('Saved version ${index + 1}'),
+                trailing: IconButton(
+                  tooltip: 'Copy saved data',
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: snapshot));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Saved version copied.')),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.copy_outlined),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
 
   void select(int index) => setState(() => selected = index);
 }

@@ -7,8 +7,11 @@ import 'package:http/http.dart' as http;
 import 'task_store.dart';
 
 class TaskAgent {
-  const TaskAgent({this.session});
+  const TaskAgent({this.session, this.accountId});
   final AppSession? session;
+  final String? accountId;
+  bool get cloudAiEnabled =>
+      session == null || session?.account?.cloudAi == true;
   static const _url = String.fromEnvironment(
     'TASK_AI_URL',
     defaultValue: 'http://localhost:5141',
@@ -20,6 +23,15 @@ class TaskAgent {
   ) async {
     final account = session;
     if (account != null) {
+      if (accountId != null && account.account?.id != accountId) {
+        throw const ApiFailure(AppSession.ended, status: 401);
+      }
+      if (!cloudAiEnabled) {
+        throw const ApiFailure(
+          'Cloud AI is off. Enable it in Privacy to request an AI proposal.',
+          status: 403,
+        );
+      }
       return account.request('POST', '/agents/tasks', {'kind': kind, ...input});
     }
     final response = await http
