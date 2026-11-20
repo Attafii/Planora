@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mobile_project/core/services/app_session.dart';
 import 'package:mobile_project/core/services/personal_sync.dart';
+import 'package:mobile_project/features/tasks/task_store.dart';
 
 import 'widget_test.dart' show MemoryPreferences;
 
@@ -22,6 +23,17 @@ class TestDisk extends MemoryPreferences {
   @override
   Future<Set<String>> getKeys({Set<String>? allowList}) async =>
       values.keys.where((key) => allowList?.contains(key) ?? true).toSet();
+}
+
+class SyncDisk extends MemoryPreferences {
+  SyncDisk(this.sync);
+  final PersonalSync sync;
+
+  @override
+  Future<String?> getString(String key) => sync.read(key);
+
+  @override
+  Future<void> setString(String key, String value) => sync.write(key, value);
 }
 
 void main() {
@@ -113,10 +125,14 @@ void main() {
       addTearDown(alice.dispose);
       addTearDown(bob.dispose);
       const key = 'planify.tasks.v1.alice';
-      const value = '[{"id":"one","title":"Offline"}]';
       final first = PersonalSync(alice, disk);
       await first.open();
-      await first.write(key, value);
+      final tasks = TaskStore(SyncDisk(first), accountId: 'alice');
+      addTearDown(tasks.dispose);
+      const task = Task(id: 'one', title: 'Offline');
+      await tasks.save(task);
+      await tasks.addSteps(task, ['First step', 'Second step']);
+      final value = await first.read(key);
       expect(first.pending, isTrue);
       first.dispose();
 
@@ -125,6 +141,13 @@ void main() {
       await restored.open();
       expect(restored.offline, isTrue);
       expect(await restored.read(key), value);
+      final restoredTasks = TaskStore(SyncDisk(restored), accountId: 'alice');
+      addTearDown(restoredTasks.dispose);
+      await restoredTasks.load();
+      expect(restoredTasks.children(task.id).map((step) => step.title), [
+        'First step',
+        'Second step',
+      ]);
       expect(restored.pending, isTrue);
 
       final isolated = PersonalSync(bob, disk);

@@ -162,6 +162,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             context,
                             MaterialPageRoute<void>(
                               builder: (_) => TasksPage(
+                                syncStatus: ListenableBuilder(
+                                  listenable: sync,
+                                  builder: (_, _) => syncStatus(),
+                                ),
                                 store: tasks,
                                 agent: TaskAgent(
                                   session: widget.session,
