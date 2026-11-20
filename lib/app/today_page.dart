@@ -19,12 +19,14 @@ class TodayPage extends StatefulWidget {
     required this.storage,
     required this.onTasks,
     required this.onCalendar,
+    this.onStartFocus,
   });
   final TaskStore tasks;
   final PlanningStore planning;
   final SharedPreferencesAsync storage;
   final String accountId;
   final VoidCallback onTasks, onCalendar;
+  final void Function(String date, PlanBlock block)? onStartFocus;
 
   @override
   State<TodayPage> createState() => _TodayPageState();
@@ -208,6 +210,14 @@ class _TodayPageState extends State<TodayPage> {
                   style: theme.textTheme.headlineMedium,
                 ),
                 if (next != null) Text(intervalLabel(next.start, next.end)),
+                if (next != null &&
+                    next.kind == BlockKind.task &&
+                    widget.onStartFocus != null)
+                  FilledButton.icon(
+                    onPressed: () => widget.onStartFocus!(dayKey(now), next),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Start focus'),
+                  ),
                 const SizedBox(height: 12),
                 FilledButton.tonalIcon(
                   onPressed: widget.onCalendar,
@@ -243,6 +253,9 @@ class _TodayPageState extends State<TodayPage> {
                 '${block.end - block.start} min · ${block.kind.name}',
               ),
               trailing: block == next ? const Icon(Icons.timelapse) : null,
+              onTap: block.kind == BlockKind.task && widget.onStartFocus != null
+                  ? () => widget.onStartFocus!(dayKey(now), block)
+                  : null,
             ),
           const Divider(),
           ListTile(

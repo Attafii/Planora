@@ -7,6 +7,9 @@ import 'package:http/testing.dart';
 import 'package:mobile_project/core/services/app_session.dart';
 import 'package:mobile_project/core/services/personal_sync.dart';
 import 'package:mobile_project/features/tasks/task_store.dart';
+import 'package:mobile_project/features/focus/focus_store.dart';
+import 'package:mobile_project/features/focus/focus_task_link.dart';
+import 'package:mobile_project/features/planning/planning_store.dart';
 
 import 'widget_test.dart' show MemoryPreferences;
 
@@ -163,6 +166,82 @@ void main() {
       expect(restored.pending, isFalse);
       expect(restored.synced, isTrue);
       expect(uploads, 1);
+    },
+  );
+
+  test(
+    'a linked focus finish syncs once after a lost acknowledgment',
+    () async {
+      const date = '2026-06-02';
+      var now = DateTime(2026, 6, 2, 8);
+      final tasks = TaskStore(MemoryPreferences());
+      final planning = PlanningStore(
+        MemoryPreferences(),
+        tasks,
+        now: () => now,
+      );
+      addTearDown(tasks.dispose);
+      addTearDown(planning.dispose);
+      const task = Task(id: 'task', title: 'Focus task');
+      await tasks.save(task);
+      await planning.approve(planning.preview(date));
+      final slot = ScheduledFocus.fromBlock(
+        planning.day(date).approved.single,
+        date,
+        null,
+      );
+
+      final remote = <String, dynamic>{};
+      var offline = true;
+      var uploads = 0;
+      final session = AppSession(
+        client: MockClient((request) async {
+          if (offline) throw http.ClientException('offline');
+          if (request.url.path == '/users/me') {
+            return http.Response(jsonEncode(profile('alice')), 200);
+          }
+          if (request.method == 'GET') {
+            return http.Response(jsonEncode({'collections': remote}), 200);
+          }
+          expect(request.url.path, '/users/me/sync/focus');
+          uploads++;
+          final body = jsonDecode(request.body) as Map;
+          remote['focus'] = {'revision': 1, 'snapshot': body['snapshot']};
+          throw http.ClientException('response lost after commit');
+        }),
+      )..account = Account.fromJson(profile('alice'));
+      addTearDown(session.dispose);
+      final disk = TestDisk();
+      final sync = PersonalSync(session, disk);
+      addTearDown(sync.dispose);
+      await sync.open();
+      final focus = FocusStore(
+        accountId: 'alice',
+        storage: SyncDisk(sync),
+        clock: () => now,
+        taskContext: FocusTaskContext(tasks, planning),
+      );
+      addTearDown(focus.dispose);
+
+      final started = focus.startScheduled(slot, 5, 'Countdown');
+      now = now.add(const Duration(seconds: 22));
+      focus.finish();
+      await focus.settled;
+      expect(sync.pending, isTrue);
+      expect(focus.recordedSecondsFor({'task'}), 22);
+
+      offline = false;
+      await sync.sync();
+      expect(sync.pending, isTrue);
+      await sync.sync();
+      expect(sync.pending, isFalse);
+      expect(uploads, 1);
+      final records = jsonDecode(remote['focus']['snapshot'] as String) as Map;
+      final saved = (records['sessions'] as List).single as Map;
+      expect(saved['id'], started.id);
+      expect(saved['seconds'], 22);
+      expect(saved['scheduled']['taskId'], task.id);
+      expect(tasks.completed(tasks.get(task.id)!), isFalse);
     },
   );
 

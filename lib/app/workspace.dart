@@ -15,6 +15,9 @@ import '../core/services/app_session.dart';
 import '../core/services/personal_sync.dart';
 import '../features/assistant/presentation/conversations_page.dart';
 import '../features/focus/focus_store.dart';
+import '../features/focus/focus_task_link.dart';
+import '../features/focus/pages.dart' show openFocus;
+import '../features/planning/planning_engine.dart' show PlanBlock;
 import 'focus_app.dart' show MobileShell;
 import '../features/planning/planning_page.dart';
 import '../features/planning/planning_store.dart';
@@ -44,9 +47,23 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   );
   PlanningAgent get planningAgent =>
       PlanningAgent(session: widget.session, accountId: accountId);
+  Widget get focusSyncStatus =>
+      ListenableBuilder(listenable: sync, builder: (_, _) => syncStatus());
+
+  void startFocus(String date, PlanBlock block) {
+    if (!mounted || widget.session.account?.id != accountId) return;
+    openFocus(
+      context,
+      focus,
+      scheduled: ScheduledFocus.fromBlock(block, date, planning.clock.zone()),
+      syncStatus: focusSyncStatus,
+    );
+  }
+
   late final focus = FocusStore(
     accountId: accountId,
     storage: storage,
+    taskContext: FocusTaskContext(tasks, planning),
     onPlanRecovery: (id) {
       if (!mounted || widget.session.account?.id != accountId) return;
       Navigator.of(context).push<void>(
@@ -55,6 +72,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             store: planning,
             agent: planningAgent,
             initialInterruptionId: id,
+            onStartFocus: startFocus,
             syncStatus: ListenableBuilder(
               listenable: sync,
               builder: (_, _) => syncStatus(),
@@ -181,6 +199,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           storage: storage,
                           accountId: accountId,
                           onCalendar: () => select(1),
+                          onStartFocus: startFocus,
                           onTasks: () => Navigator.push(
                             context,
                             MaterialPageRoute<void>(
@@ -190,6 +209,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                   builder: (_, _) => syncStatus(),
                                 ),
                                 store: tasks,
+                                focus: focus,
                                 agent: TaskAgent(
                                   session: widget.session,
                                   accountId: accountId,
@@ -202,11 +222,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           store: planning,
                           embedded: true,
                           agent: planningAgent,
+                          onStartFocus: startFocus,
                         ),
                         ListenableBuilder(
                           listenable: focus,
-                          builder: (_, _) =>
-                              MobileShell(store: focus, embedded: true),
+                          builder: (_, _) => MobileShell(
+                            store: focus,
+                            embedded: true,
+                            syncStatus: focusSyncStatus,
+                          ),
                         ),
                         const ConversationsPage(embedded: true),
                         const _MorePage(),

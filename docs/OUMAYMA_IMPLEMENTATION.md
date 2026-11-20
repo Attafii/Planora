@@ -1,5 +1,7 @@
 # Oumayma mobile implementation
 
+The [focus follow-through guide](OUMAYMA_FOCUS_FOLLOW_THROUGH.md) describes the current integrated Calendar, task, and sync flows. The original module handoff follows.
+
 Implemented on the local `Oumayma` branch. The app opens directly into Today, with Focus, Reminders and Time log navigation. Authentication, task CRUD, calendar planning and teammate dashboards are outside this branch's pages.
 
 ## Run

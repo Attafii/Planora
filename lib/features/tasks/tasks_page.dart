@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/services/app_session.dart';
+import '../focus/focus_store.dart';
+import '../focus/pages.dart' show clock;
 
 import 'task_agent.dart';
 import 'task_store.dart';
@@ -14,11 +16,13 @@ class TasksPage extends StatefulWidget {
     this.embedded = false,
     this.agent = const TaskAgent(),
     this.syncStatus,
+    this.focus,
   });
   final TaskStore store;
   final bool embedded;
   final TaskAgent agent;
   final Widget? syncStatus;
+  final FocusStore? focus;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -159,7 +163,7 @@ class _TasksPageState extends State<TasksPage> {
       context,
       MaterialPageRoute(
         builder: (_) => ListenableBuilder(
-          listenable: store,
+          listenable: Listenable.merge([store, widget.focus]),
           builder: (context, _) {
             final current = store.get(task.id);
             if (current == null || current.skipped) {
@@ -168,6 +172,10 @@ class _TasksPageState extends State<TasksPage> {
               );
             }
             final children = store.children(current.id);
+            final recorded = widget.focus?.recordedSecondsFor({
+              current.id,
+              ...children.map((step) => step.id),
+            });
             final blockers = store.blockers(current);
             final readySteps = children.where(store.ready);
             final next =
@@ -209,6 +217,12 @@ class _TasksPageState extends State<TasksPage> {
                   Text(
                     '${current.minutes} min · ${current.energy.name} energy${current.due == null ? '' : ' · Due ${current.due}'}',
                   ),
+                  if (recorded != null)
+                    Text(
+                      recorded == 0
+                          ? 'No recorded focus time.'
+                          : 'Recorded focus time · ${clock(recorded)} (min:sec)',
+                    ),
                   if (blockers.isNotEmpty)
                     Text(
                       'Blocked by ${blockers.map((t) => t.title).join(', ')}',
