@@ -9,6 +9,11 @@ enum ActivityType { general, work, study, movement, personal }
 
 enum Repeat { once, daily, weekly }
 
+const sharedTaskPrefix = 'project:';
+String sharedTaskKey(String id) => '$sharedTaskPrefix$id';
+bool isSharedTaskKey(String id) => id.startsWith(sharedTaskPrefix);
+String sharedTaskLabel(String id) => 'Project task · ${id.split('-').first}';
+
 String dayKey(DateTime day) => day.toIso8601String().substring(0, 10);
 
 class Task {
@@ -92,6 +97,24 @@ class TaskStore extends ChangeNotifier {
   final SharedPreferencesAsync _storage;
   final String _key;
   Map<String, Task> _saved = {};
+  Map<String, Task> _shared = {};
+  Future<void> Function()? refreshShared;
+  Future<void> Function(String id)? completeShared;
+
+  void setSharedTasks(Iterable<Task> current) {
+    if (_disposed) return;
+    final next = {for (final task in current) task.id: task};
+    if (mapEquals(
+      _shared.map((id, task) => MapEntry(id, jsonEncode(task))),
+      next.map((id, task) => MapEntry(id, jsonEncode(task))),
+    )) {
+      return;
+    }
+    _shared = next;
+    revision++;
+    notifyListeners();
+  }
+
   Future<void> _pending = Future.value();
   int _sequence = 0;
   int revision = 0;
@@ -137,8 +160,10 @@ class TaskStore extends ChangeNotifier {
     return _taskList(first, -30, 60);
   }
 
-  List<Task> forPlanningDate(String date) =>
-      _taskList(DateTime.parse('${date}T00:00:00Z'), 0, 0);
+  List<Task> forPlanningDate(String date) => [
+    ..._taskList(DateTime.parse('${date}T00:00:00Z'), 0, 0),
+    ..._shared.values,
+  ];
 
   List<Task> _taskList(DateTime first, int from, int through) {
     final tasks = <String, Task>{
@@ -175,6 +200,7 @@ class TaskStore extends ChangeNotifier {
   });
 
   Task? get(String id) {
+    if (isSharedTaskKey(id)) return _shared[id];
     final saved = _saved[id];
     if (saved != null || !id.contains('@')) return saved;
     final parts = id.split('@');
@@ -402,7 +428,17 @@ class TaskStore extends ChangeNotifier {
     }
   });
 
-  Future<void> markDone(String id) => _write((next) {
+  Future<void> markDone(String id) async {
+    if (isSharedTaskKey(id)) {
+      final complete = completeShared;
+      if (complete == null) throw StateError('Shared work is unavailable.');
+      await complete(id.substring(sharedTaskPrefix.length));
+      return;
+    }
+    await _markPersonalDone(id);
+  }
+
+  Future<void> _markPersonalDone(String id) => _write((next) {
     final current = get(id);
     if (current == null || current.skipped) {
       throw StateError('This task is no longer available.');

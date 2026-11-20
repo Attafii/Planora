@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
 import '../../../core/utils/validators.dart';
+import '../../../core/utils/write_id.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../models/project.dart';
 
@@ -15,6 +16,7 @@ class ProjectEditor extends StatefulWidget {
 class _ProjectEditorState extends State<ProjectEditor> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _title, _description;
+  late final _requestId = newWriteId();
   bool _dirty = false, _saved = false;
   @override
   void initState() {
@@ -49,7 +51,7 @@ class _ProjectEditorState extends State<ProjectEditor> {
     },
     child: ProductPage(
       title: widget.project == null ? 'New project' : 'Edit project',
-      subtitle: 'A focused space for your shared outcome.',
+      subtitle: 'Project changes require a connection.',
       child: SingleChildScrollView(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
@@ -84,6 +86,8 @@ class _ProjectEditorState extends State<ProjectEditor> {
                   onPressed: () async {
                     if (!_form.currentState!.validate()) return;
                     await AppScope.of(context).collaboration.save({
+                      if (widget.project == null) 'request_id': _requestId,
+                      'expected_updated_at': ?widget.project?.updatedAt,
                       'title': _title.text,
                       'description': _description.text,
                     }, id: widget.project?.id);

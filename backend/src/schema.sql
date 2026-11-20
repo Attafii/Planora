@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS goals (
  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, title TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', start_date TEXT, target_date TEXT,
- status TEXT NOT NULL CHECK(status IN ('active','completed','archived')),
+ status TEXT NOT NULL CHECK(status IN ('active','paused','completed','archived')),
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS milestones (
@@ -43,6 +43,22 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS goal_tasks (
  goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+ PRIMARY KEY(goal_id,task_id)
+);
+DO $migration$
+BEGIN
+ IF EXISTS (
+  SELECT 1 FROM pg_constraint WHERE conrelid='goals'::regclass
+   AND conname='goals_status_check' AND pg_get_constraintdef(oid) NOT LIKE '%paused%'
+ ) THEN
+  ALTER TABLE goals DROP CONSTRAINT goals_status_check;
+  ALTER TABLE goals ADD CONSTRAINT goals_status_check CHECK(status IN ('active','paused','completed','archived'));
+ END IF;
+END
+$migration$;
+CREATE TABLE IF NOT EXISTS goal_personal_tasks (
+ goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+ task_id TEXT NOT NULL,
  PRIMARY KEY(goal_id,task_id)
 );
 CREATE TABLE IF NOT EXISTS task_assignments (

@@ -103,7 +103,9 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       if (path === '/health' && req.method === 'GET') return send(200, { status: 'ok' });
       if (workspace && /^\/(goals|tasks|projects|invitations|assistant|gamification|achievements|challenges|integrations)(\/|$)/.test(path)) {
         const profile = path.startsWith('/integrations/') ? null : user(identity(req).id);
-        return workspace(req, res, profile);
+        return workspace(req, res, profile, profile && /^\/goals(?:\/|$)/.test(path)
+          ? db.prepare("SELECT snapshot FROM personal_sync WHERE user_id=? AND collection='tasks'").get(profile.id)?.snapshot
+          : undefined);
       }
       if (path.startsWith('/auth/') && req.method === 'POST') rateLimit(req);
       let body = {};

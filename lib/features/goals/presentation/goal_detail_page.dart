@@ -8,6 +8,8 @@ import '../../collaboration/presentation/project_workspace.dart';
 import '../models/goal.dart';
 import 'goal_editor.dart';
 import 'task_surfaces.dart';
+import 'work_progress.dart';
+import '../../tasks/task_store.dart';
 
 class GoalDetailPage extends StatelessWidget {
   const GoalDetailPage({super.key, required this.id});
@@ -16,6 +18,7 @@ class GoalDetailPage extends StatelessWidget {
   Widget build(BuildContext context) => ProductPage(
     title: 'Goal details',
     child: AsyncView<Goal>(
+      revalidateEvery: const Duration(seconds: 15),
       load: () => AppScope.of(context).goals.detail(id),
       builder: (ctx, g, refresh) => SingleChildScrollView(
         padding: const EdgeInsets.only(bottom: 32),
@@ -48,12 +51,41 @@ class GoalDetailPage extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 24),
-            ProgressMeter(g.progress, label: 'Linked work complete'),
+            WorkProgress(
+              percent: g.progress,
+              checkedAt: g.checkedAt,
+              taskIds: {
+                for (final task in g.tasks)
+                  if (task.personal)
+                    task.id
+                  else if (task.projectId != null)
+                    sharedTaskKey(task.id),
+              },
+              summary: switch (g.progressSource) {
+                'tasks' =>
+                  '${g.completedCount} of ${g.itemCount} linked tasks completed.',
+                'milestones' =>
+                  '${g.completedCount} of ${g.itemCount} milestones confirmed.',
+                'unavailable' =>
+                  'Progress unavailable until personal tasks sync.',
+                _ => 'No linked activity to measure yet.',
+              },
+            ),
             const SizedBox(height: 28),
             Wrap(
               spacing: 12,
               runSpacing: 12,
               children: [
+                BusyButton(
+                  label: 'Refresh activity',
+                  outlined: true,
+                  onPressed: () async {
+                    if (g.projectId == null) {
+                      await AppScope.of(context).workActivity?.syncPersonal();
+                    }
+                    refresh();
+                  },
+                ),
                 if (g.canEdit) ...[
                   BusyButton(
                     label: 'Edit goal',
@@ -286,6 +318,26 @@ class GoalDetailPage extends StatelessWidget {
                   'Link existing tasks or add work for this outcome.',
                 ),
               ),
+            for (final missing in g.missingTasks)
+              ListTile(
+                title: const Text('Linked task unavailable'),
+                subtitle: Text(
+                  g.progressSource == 'unavailable'
+                      ? 'Sync personal tasks to restore this link.'
+                      : 'This task was deleted, skipped, or is no longer available.',
+                ),
+                trailing: g.canEdit
+                    ? BusyButton(
+                        label: 'Unlink',
+                        outlined: true,
+                        onPressed: () async {
+                          await AppScope.of(context).goals
+                              .unlink(g.id, missing, personal: true);
+                          refresh();
+                        },
+                      )
+                    : null,
+              ),
             for (final t in g.tasks)
               ListTile(
                 contentPadding: const EdgeInsets.symmetric(vertical: 4),
@@ -299,12 +351,34 @@ class GoalDetailPage extends StatelessWidget {
                   '${t.minutes} min · ${t.status.replaceAll('_', ' ')}',
                 ),
                 onTap: () async {
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => LinkedTaskPage(id: t.id),
-                    ),
-                  );
+                  if (t.personal) {
+                    final work = AppScope.of(context).workActivity;
+                    if (work?.tasks.get(t.id) == null) {
+                      feedback(
+                        context,
+                        'This task is unavailable on this device. Sync from Today and try again.',
+                        error: true,
+                      );
+                      return;
+                    }
+                    await work!.openTask(t.id);
+                    if (!context.mounted) return;
+                    try {
+                      await work.syncPersonal();
+                    } catch (error) {
+                      if (context.mounted) {
+                        feedback(context, error.toString(), error: true);
+                      }
+                      return;
+                    }
+                  } else {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => LinkedTaskPage(id: t.id),
+                      ),
+                    );
+                  }
                   refresh();
                 },
                 trailing: g.canEdit
@@ -321,7 +395,7 @@ class GoalDetailPage extends StatelessWidget {
                             if (!context.mounted) return;
                             try {
                               await AppScope.of(context).goals
-                                  .unlink(g.id, t.id);
+                                  .unlink(g.id, t.id, personal: t.personal);
                               refresh();
                             } catch (e) {
                               if (context.mounted) {
@@ -339,10 +413,12 @@ class GoalDetailPage extends StatelessWidget {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  if (g.status != 'completed')
+                  if (g.status == 'active' || g.status == 'paused')
                     BusyButton(
                       label: 'Complete goal',
-                      enabled: g.itemCount == 0 || g.progress == 100,
+                      enabled:
+                          g.progressSource != 'unavailable' &&
+                          g.itemCount == g.completedCount,
                       onPressed: () async {
                         await AppScope.of(context).goals
                             .save(g.toForm(newStatus: 'completed'), id: g.id);
@@ -353,6 +429,24 @@ class GoalDetailPage extends StatelessWidget {
                             'Goal completed. Your achievement progress is updated.',
                           );
                         }
+                      },
+                    ),
+                  if (g.status == 'active' || g.status == 'paused')
+                    BusyButton(
+                      label: g.status == 'paused'
+                          ? 'Resume goal'
+                          : 'Pause goal',
+                      outlined: true,
+                      onPressed: () async {
+                        await AppScope.of(context).goals.save(
+                          g.toForm(
+                            newStatus: g.status == 'paused'
+                                ? 'active'
+                                : 'paused',
+                          ),
+                          id: g.id,
+                        );
+                        refresh();
                       },
                     ),
                   BusyButton(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../app/app_services.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/validators.dart';
+import '../../../core/utils/write_id.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../../collaboration/models/project.dart';
 import '../models/goal.dart';
@@ -19,6 +20,7 @@ class _GoalEditorState extends State<GoalEditor> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _title, _description, _start, _target;
   String? _project;
+  late final _requestId = newWriteId();
   bool _dirty = false, _saved = false;
   @override
   void initState() {
@@ -51,6 +53,8 @@ class _GoalEditorState extends State<GoalEditor> {
       return;
     }
     final g = await AppScope.of(context).goals.save({
+      if (widget.goal == null) 'request_id': _requestId,
+      'expected_updated_at': ?widget.goal?.updatedAt,
       'title': _title.text.trim(),
       'description': _description.text.trim(),
       'project_id': _project,
@@ -84,7 +88,7 @@ class _GoalEditorState extends State<GoalEditor> {
     },
     child: ProductPage(
       title: widget.goal == null ? 'New goal' : 'Edit goal',
-      subtitle: 'A clear outcome is a good place to start.',
+      subtitle: 'Goal changes require a connection.',
       child: SingleChildScrollView(
         padding: const EdgeInsets.only(bottom: 32),
         child: ConstrainedBox(
@@ -136,7 +140,7 @@ class _GoalEditorState extends State<GoalEditor> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                if (widget.goal == null)
+                if (widget.goal == null && widget.projectId == null)
                   AsyncView<List<Project>>(
                     load: () async =>
                         (await AppScope.of(context).collaboration.list()).items
@@ -173,7 +177,7 @@ class _GoalEditorState extends State<GoalEditor> {
                   Text(
                     _project == null
                         ? 'Personal goal'
-                        : 'Shared goal · workspace is preserved',
+                        : 'Shared goal in this project',
                   ),
                 const SizedBox(height: 32),
                 BusyButton(label: 'Save goal', onPressed: _save),

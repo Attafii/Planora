@@ -132,8 +132,26 @@ class PlanningStore extends ChangeNotifier {
   List<PlanBlock> calendarEntries(String date) {
     final plan = _days[date];
     if (plan == null) return const [];
-    return [...plan.approved, ...plan.reserved]
+    return [...visibleApproved(date), ...plan.reserved]
       ..sort((a, b) => a.start.compareTo(b.start));
+  }
+
+  Iterable<PlanBlock> visibleApproved(String date) => day(date).approved.where(
+    (block) => !isSharedTaskKey(block.id) || tasks.get(block.id) != null,
+  );
+
+  Iterable<({String date, PlanBlock block})> upcomingFor(
+    Set<String> ids,
+  ) sync* {
+    final dates = _days.keys.toList()..sort();
+    for (final date in dates) {
+      final cutoff = cutoffFor(date);
+      for (final block in visibleApproved(date)) {
+        if (block.end > cutoff && ids.contains(block.id)) {
+          yield (date: date, block: block);
+        }
+      }
+    }
   }
 
   Future<void> load() async {
@@ -498,7 +516,16 @@ class PlanningStore extends ChangeNotifier {
     );
   }
 
-  Future<void> approve(PlanDraft draft) => _save(draft.day, (current) {
+  Future<void> approve(PlanDraft draft) async {
+    if (draft.result.blocks.any(
+      (block) => isSharedTaskKey(block.id) && block.start >= draft.cutoff,
+    )) {
+      await tasks.refreshShared?.call();
+    }
+    await _apply(draft);
+  }
+
+  Future<void> _apply(PlanDraft draft) => _save(draft.day, (current) {
     if (isStale(draft)) {
       throw StateError(
         'The schedule or tasks changed. Generate a fresh preview.',

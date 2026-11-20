@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createApi } from './server.mjs';
 import { createApp } from './src/app.mjs';
 import { openDatabase } from './src/database.mjs';
+import { personalTaskView } from './src/work_progress.mjs';
 import { ApiError } from './src/core.mjs';
 
 const profiles = new WeakMap();
@@ -14,7 +15,7 @@ const profiles = new WeakMap();
 export function createPlanifyServer(db, options = {}) {
   const workspace = createApp(db, {
     async identify(req, tx) {
-      const profile = profiles.get(req);
+      const { profile, tasksSnapshot } = profiles.get(req) ?? {};
       if (!profile) throw new ApiError(401, 'Sign in to continue.', 'unauthorized');
       await tx.query(
         `INSERT INTO users(id, name, email, password_hash, timezone, created_at)
@@ -22,7 +23,7 @@ export function createPlanifyServer(db, options = {}) {
          ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, timezone=EXCLUDED.timezone`,
         [profile.id, profile.name, profile.email, 'external-account', profile.timezone, profile.created_at],
       );
-      return { ...profile, cloudAi: profile.preferences.cloud_ai };
+      return { ...profile, cloudAi: profile.preferences.cloud_ai, personalTasks: personalTaskView(tasksSnapshot) };
     },
   });
 
@@ -43,8 +44,8 @@ export function createPlanifyServer(db, options = {}) {
         throw new ApiError(error.status || 502, error.status ? error.message : 'The AI provider is unavailable.', 'agent_error');
       }
     },
-    workspace(req, res, profile) {
-      profiles.set(req, profile);
+    workspace(req, res, profile, tasksSnapshot) {
+      profiles.set(req, { profile, tasksSnapshot });
       workspace(req, res);
     },
   });

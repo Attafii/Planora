@@ -428,7 +428,7 @@ class _PlanningPageState extends State<PlanningPage> {
     listenable: Listenable.merge([store, store.tasks, agent.session]),
     builder: (context, _) {
       final current = store.day(date);
-      final timeline = [...current.approved, ...current.reserved]
+      final timeline = [...store.visibleApproved(date), ...current.reserved]
         ..sort((a, b) => a.start.compareTo(b.start));
       final canEdit = !busy && store.cutoffFor(date) < 1440;
       final calendar = CalendarPanel(
@@ -508,7 +508,7 @@ class _PlanningPageState extends State<PlanningPage> {
     final theme = Theme.of(context);
     final dateLabel = MaterialLocalizations.of(context)
         .formatFullDate(DateTime.parse(date));
-    final scheduled = plan.approved.length;
+    final scheduled = store.visibleApproved(date).length;
     final unscheduled = store.unscheduled(date);
     final candidates = {
       for (final task in store.candidatesFor(date)) task.id: task,

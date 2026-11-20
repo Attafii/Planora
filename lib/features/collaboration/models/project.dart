@@ -7,7 +7,11 @@ class Project {
       title = d['title'] as String,
       description = d['description'] as String? ?? '',
       role = d['role'] as String,
-      progress = (d['progress'] as num? ?? 0).toInt(),
+      progress = (d['progress'] as num?)?.toInt(),
+      updatedAt = d['updated_at'] as String?,
+      checkedAt = d['progress_checked_at'] as String?,
+      itemCount = (d['item_count'] as num? ?? 0).toInt(),
+      completedCount = (d['completed_count'] as num? ?? 0).toInt(),
       memberCount = int.tryParse('${d['member_count'] ?? 0}') ?? 0,
       members = ((d['members'] as List?) ?? [])
           .map((x) => Member.fromJson(x as JsonMap))
@@ -17,7 +21,9 @@ class Project {
           .toList(),
       goals = ((d['goals'] as List?) ?? []).cast<JsonMap>();
   final String id, title, description, role;
-  final int progress, memberCount;
+  final int? progress;
+  final String? updatedAt, checkedAt;
+  final int itemCount, completedCount, memberCount;
   final List<Member> members;
   final List<TaskItem> tasks;
   final List<JsonMap> goals;

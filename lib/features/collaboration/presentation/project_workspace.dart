@@ -6,6 +6,8 @@ import '../models/project.dart';
 import '../../goals/presentation/goal_editor.dart';
 import '../../goals/presentation/goal_detail_page.dart';
 import '../../goals/presentation/task_surfaces.dart';
+import '../../goals/presentation/work_progress.dart';
+import '../../tasks/task_store.dart';
 import '../../assistant/presentation/chat_page.dart';
 import 'project_editor.dart';
 import 'members_invitations.dart';
@@ -18,6 +20,7 @@ class ProjectWorkspace extends StatelessWidget {
   Widget build(BuildContext context) => ProductPage(
     title: 'Project workspace',
     child: AsyncView<Project>(
+      revalidateEvery: const Duration(seconds: 15),
       load: () => AppScope.of(context).collaboration.detail(id),
       builder: (ctx, p, refresh) => DefaultTabController(
         length: 4,
@@ -47,6 +50,10 @@ class ProjectWorkspace extends StatelessWidget {
                   },
                   icon: const Icon(Icons.people_outline),
                   label: Text('${p.members.length} members'),
+                ),
+                OutlinedButton(
+                  onPressed: refresh,
+                  child: const Text('Refresh project'),
                 ),
                 if (p.canManage)
                   OutlinedButton(
@@ -180,7 +187,18 @@ class _Overview extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 32),
     children: [
       Surface(
-        child: ProgressMeter(project.progress, label: 'Project work completed'),
+        child: WorkProgress(
+          percent: project.progress,
+          checkedAt: project.checkedAt,
+          taskIds: {
+            for (final task in project.tasks)
+              if (task.status != 'archived' && task.status != 'cancelled')
+                sharedTaskKey(task.id),
+          },
+          summary: project.itemCount == 0
+              ? 'No project tasks to measure yet.'
+              : '${project.completedCount} of ${project.itemCount} project tasks completed.',
+        ),
       ),
       const SizedBox(height: 28),
       Row(
@@ -233,18 +251,16 @@ class _Overview extends StatelessWidget {
       for (final m in project.members)
         ListTile(
           leading: CircleAvatar(
-            child: Text(m.name.substring(0, 1).toUpperCase()),
+            child: Text(m.name.characters.first.toUpperCase()),
           ),
           title: Text(m.name),
           subtitle: Text(m.role),
           trailing: Text(
-            '${project.tasks.where((t) => t.assigneeId == m.id && t.status == 'completed').length} / ${project.tasks.where((t) => t.assigneeId == m.id).length} tasks',
+            '${project.tasks.where((t) => t.assigneeId == m.id && t.status == 'completed').length} / ${project.tasks.where((t) => t.assigneeId == m.id && t.status != 'archived' && t.status != 'cancelled').length} tasks',
           ),
         ),
       const SizedBox(height: 12),
-      const Text(
-        'Completed / assigned work. Progress measures outcomes, not hours or rankings.',
-      ),
+      const Text('Completed tasks out of current assigned work.'),
     ],
   );
 }

@@ -17,12 +17,14 @@ class TasksPage extends StatefulWidget {
     this.agent = const TaskAgent(),
     this.syncStatus,
     this.focus,
+    this.initialTaskId,
   });
   final TaskStore store;
   final bool embedded;
   final TaskAgent agent;
   final Widget? syncStatus;
   final FocusStore? focus;
+  final String? initialTaskId;
 
   @override
   State<TasksPage> createState() => _TasksPageState();
@@ -35,6 +37,18 @@ class _TasksPageState extends State<TasksPage> {
   bool readyOnly = false;
   bool showSkipped = false;
   TaskStore get store => widget.store;
+
+  @override
+  void initState() {
+    super.initState();
+    final id = widget.initialTaskId;
+    if (id != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (store.get(id) case final task?) detail(task);
+      });
+    }
+  }
 
   Future<void> run(Future<void> Function() action) async {
     if (busy) return;
