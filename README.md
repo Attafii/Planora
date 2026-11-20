@@ -1,9 +1,9 @@
-# Planify — Eya account layer
+# Planify
 
-This branch implements authentication, personal profile, persistent preferences,
-privacy consent, and private insights. It contains no task editing, goal/project
-management, assistant implementation, achievement views, or focus tracking.
-Ahmed's stash is preserved.
+Planify brings together personal tasks, calendar planning, focus, collaboration,
+goals, and AI assistance in one authenticated workspace. See
+[Personal data sync and session restoration](docs/EYA_SESSION_AND_SYNC.md) for
+the account and offline behavior.
 
 Session/security controls, profile quality guidance, searchable account Help,
 AI context preview, and policy-gated personal data tools are documented in
@@ -11,27 +11,24 @@ AI context preview, and policy-gated personal data tools are documented in
 
 ## Run locally
 
-Requirements: Flutter matching pubspec.yaml; Node.js 22.17 or later (built-in SQLite).
-No npm dependencies or mail credentials are required.
+Requirements are Flutter matching pubspec.yaml and Node.js 22.17 or later.
+
+```powershell
+npm --prefix backend ci
+npm --prefix backend start
+```
+
+In a separate terminal, start Flutter.
 
 ```powershell
 flutter pub get
-flutter build web --release
-node backend/preview.mjs
+flutter run -d chrome --web-port 8052
 ```
 
-Open http://localhost:5173. Create your own account; there are no seeded users.
-The preview runs the API on 127.0.0.1:3000 and web on 127.0.0.1:5173.
-SQLite state is kept under `backend/data/` and is ignored by Git.
+The API listens on port 4100 by default. Create an account on first use.
+See [Planify integration](docs/PLANIFY_INTEGRATION.md) for API configuration.
 
-For Flutter development, run the API and Flutter separately:
-
-```powershell
-node backend/server.mjs
-flutter run -d chrome --web-port 5173 --dart-define=API_BASE_URL=http://localhost:3000
-```
-
-For Android emulator use API_BASE_URL=http://10.0.2.2:3000 and a reachable development
+For Android emulator use API_BASE_URL=http://10.0.2.2:4100 and a reachable development
 API listener (`HOST=0.0.0.0` only on a trusted local development network). Native
 release builds require an HTTPS API. Android release has Internet permission;
 cleartext HTTP is not enabled in release. iOS/macOS builds require Apple tooling;
@@ -40,7 +37,8 @@ Linux secure storage requires the package's libsecret prerequisites.
 ## Verification
 
 ```powershell
-node --test backend/account.test.mjs backend/analytics.test.mjs backend/account-controls.test.mjs
+npm --prefix backend run check
+npm --prefix backend test
 flutter test
 flutter analyze
 flutter build web --release

@@ -36,16 +36,26 @@ class ApiClient {
     Duration timeout = const Duration(seconds: 35),
   }) async {
     try {
+      final requestToken = token;
       final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
       final request = http.Request(method, uri)
         ..headers.addAll({
           'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
+          if (requestToken != null) 'Authorization': 'Bearer $requestToken',
         });
       if (body != null) request.body = jsonEncode(body);
       final streamed = await _client.send(request).timeout(timeout);
       final response = await http.Response.fromStream(streamed)
           .timeout(timeout);
+      if (requestToken != token) {
+        throw const ApiException(
+          'Your session changed. Please try again.',
+          status: 401,
+        );
+      }
+      if (response.statusCode == 401 && requestToken != null) {
+        onUnauthorized?.call();
+      }
       final Object? data;
       try {
         data = jsonDecode(response.body);
@@ -56,7 +66,6 @@ class ApiClient {
         );
       }
       if (response.statusCode >= 400) {
-        if (response.statusCode == 401 && token != null) onUnauthorized?.call();
         final error = data is JsonMap ? data['error'] as JsonMap? : null;
         throw ApiException(
           error?['message'] as String? ??

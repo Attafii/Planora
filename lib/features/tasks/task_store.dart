@@ -90,17 +90,30 @@ class TaskStore extends ChangeNotifier {
   Future<void> _pending = Future.value();
   int _sequence = 0;
   int revision = 0;
+  bool _disposed = false;
+  Future<void> get settled => _pending;
 
   String newId() => '${DateTime.now().microsecondsSinceEpoch}-${_sequence++}';
 
   Future<void> load() async {
     final value = await _storage.getString(_key);
-    if (value == null) return;
-    _saved = {
-      for (final json in jsonDecode(value) as List)
-        (json as Map<String, dynamic>)['id'] as String: Task.fromJson(json),
-    };
+    if (_disposed) return;
+    _saved = value == null
+        ? {}
+        : {
+            for (final json in jsonDecode(value) as List)
+              (json as Map<String, dynamic>)['id'] as String: Task.fromJson(
+                json,
+              ),
+          };
+    revision++;
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   List<Task> get prerequisites => _saved.values
@@ -210,7 +223,7 @@ class TaskStore extends ChangeNotifier {
       );
       _saved = next;
       revision++;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     });
     _pending = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;

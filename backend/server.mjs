@@ -33,7 +33,12 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
     CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, email_verified_at TEXT, password_hash TEXT NOT NULL, salt TEXT NOT NULL, timezone TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'en', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS preferences (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, theme TEXT NOT NULL DEFAULT 'system', cloud_ai INTEGER NOT NULL DEFAULT 0, consent_version TEXT, consent_updated_at TEXT);
     CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL);
-    CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);`);
+    CREATE INDEX IF NOT EXISTS session_expiry ON sessions(expires_at);
+    CREATE TABLE IF NOT EXISTS personal_sync (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      collection TEXT NOT NULL, revision INTEGER NOT NULL, snapshot TEXT NOT NULL,
+      PRIMARY KEY (user_id, collection)
+    );`);
   const limits = new Map();
   // Password work has bounded concurrency as well as per-address rate limits.
   let activeHashes = 0;
@@ -94,6 +99,7 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       controls.sweep();
       const url = new URL(req.url, 'http://localhost');
       const path = url.pathname;
+      const syncCollection = path.match(/^\/users\/me\/sync\/(tasks|planning|focus|check-ins)$/)?.[1];
       if (path === '/health' && req.method === 'GET') return send(200, { status: 'ok' });
       if (workspace && /^\/(goals|tasks|projects|invitations|assistant|gamification|achievements|challenges|integrations)(\/|$)/.test(path)) {
         const profile = path.startsWith('/integrations/') ? null : user(identity(req).id);
@@ -103,8 +109,15 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       let body = {};
       if (['POST', 'PATCH', 'DELETE'].includes(req.method)) {
         if (!req.headers['content-type']?.startsWith('application/json')) throw new ApiError(415, 'content_type', 'Use application/json.');
-        let raw = '';
-        for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > 16384) throw new ApiError(413, 'too_large', 'Request is too large.'); }
+        const maxBytes = syncCollection && req.method === 'POST' ? 2 * 1024 * 1024 : 16384;
+        const chunks = [];
+        let bytes = 0;
+        for await (const chunk of req) {
+          bytes += chunk.length;
+          if (bytes > maxBytes) throw new ApiError(413, 'too_large', 'Request is too large.');
+          chunks.push(chunk);
+        }
+        const raw = Buffer.concat(chunks).toString('utf8');
         try { body = JSON.parse(raw || '{}'); } catch { throw new ApiError(400, 'json', 'Invalid JSON.'); }
         if (!body || Array.isArray(body) || typeof body !== 'object') fail('Expected an object.');
       }
@@ -147,6 +160,48 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       if (!path.startsWith('/users/me')) throw new ApiError(404, 'not_found', 'Route not found.');
       const auth = identity(req);
       if (path === '/users/me/reauthenticate' && req.method === 'POST') rateLimit(req);
+      if (path === '/users/me/sync' && req.method === 'GET') {
+        const rows = db.prepare('SELECT collection,revision,snapshot FROM personal_sync WHERE user_id=?').all(auth.id);
+        return send(200, { collections: Object.fromEntries(rows.map(
+          ({ collection, revision, snapshot }) => [collection, { revision, snapshot }],
+        )) });
+      }
+      if (syncCollection && req.method === 'POST') {
+        allowed(body, ['revision', 'snapshot']);
+        if (!Number.isSafeInteger(body.revision) || body.revision < 0 || typeof body.snapshot !== 'string') {
+          fail('A valid revision and snapshot are required.');
+        }
+        let snapshot;
+        try { snapshot = JSON.parse(body.snapshot); } catch { fail('Snapshot must be valid JSON.'); }
+        if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) !== (syncCollection === 'tasks')) {
+          fail('Invalid personal data collection.');
+        }
+        if (syncCollection === 'focus' && !['sessions', 'reminders', 'inbox'].every(key => Array.isArray(snapshot[key]))) {
+          fail('Invalid focus collection.');
+        }
+        if (syncCollection === 'check-ins' && Object.entries(snapshot).some(
+          ([date, mood]) => !/^\d{4}-\d{2}-\d{2}$/.test(date) || typeof mood !== 'string' || mood.length > 100,
+        )) fail('Invalid check-in collection.');
+
+        db.exec('BEGIN IMMEDIATE');
+        let result;
+        try {
+          const current = db.prepare('SELECT revision,snapshot FROM personal_sync WHERE user_id=? AND collection=?')
+            .get(auth.id, syncCollection) ?? { revision: 0, snapshot: null };
+          if (current.snapshot === body.snapshot) {
+            result = { applied: true, ...current };
+          } else if (current.revision !== body.revision) {
+            result = { applied: false, ...current };
+          } else {
+            result = { applied: true, revision: current.revision + 1, snapshot: body.snapshot };
+            db.prepare('INSERT INTO personal_sync(user_id,collection,revision,snapshot) VALUES (?,?,?,?) ' +
+              'ON CONFLICT(user_id,collection) DO UPDATE SET revision=excluded.revision,snapshot=excluded.snapshot')
+              .run(auth.id, syncCollection, result.revision, result.snapshot);
+          }
+          db.exec('COMMIT');
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+        return send(200, result);
+      }
       const controlled = await controls.handle({ req, path, url, body, auth });
       if (controlled) return send(controlled.status, controlled.data);
       if (path === '/users/me' && req.method === 'GET') return send(200, user(auth.id));
@@ -158,8 +213,19 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       }
       if (path === '/users/me/preferences' && req.method === 'GET') return send(200, { timezone: user(auth.id).timezone, language: user(auth.id).language, ...user(auth.id).preferences });
       if (path === '/users/me/preferences' && req.method === 'PATCH') {
-        allowed(body, ['timezone','language','theme','cloud_ai']);
+        allowed(body, ['timezone','language','theme','cloud_ai','expected']);
         const u = user(auth.id);
+        if ('expected' in body) {
+          if (!body.expected || Array.isArray(body.expected) || typeof body.expected !== 'object') fail('Invalid original settings.');
+          allowed(body.expected, ['timezone','language','theme']);
+          const current = { timezone: u.timezone, language: u.language, theme: u.preferences.theme };
+          for (const [key, previous] of Object.entries(body.expected)) {
+            if (!(key in body) || typeof previous !== 'string') fail('Invalid original settings.');
+            if (current[key] !== previous && current[key] !== body[key]) {
+              throw new ApiError(409, 'preferences_changed', 'These preferences changed on another device. Reopen Preferences to review the current settings.');
+            }
+          }
+        }
         const timezone = body.timezone ?? u.timezone; zone(timezone);
         const language = body.language ?? u.language, theme = body.theme ?? u.preferences.theme;
         if (!['en','fr'].includes(language)) fail('Unsupported language.', { language: 'Choose English or French.' });

@@ -8,4 +8,4 @@ Start the shared server from `backend` using `npm ci` and `npm start`. In the re
 
 Create a Planify account to open the workspace. For live cloud suggestions, set `AI_API_KEY`, `AI_MODEL`, and the provider's `AI_BASE_URL` in the backend environment, then enable cloud AI in Privacy. The branches' existing AI adapters use OpenAI-compatible provider endpoints. The calendar engine and local assistant can run independently of a configured AI provider.
 
-Personal tasks, schedules, focus sessions and reminders use per-account device storage. Project and goal data live on the workspace server. Standalone branch data remains in its original storage and may require migration. Cross-device sync, consolidated account export/deletion, recovery mail, and platform notification delivery require additional integration or platform verification.
+Personal tasks, schedules, focus sessions, reminders and daily check-ins use per-account device storage and sync through the account API. Project and goal data live on the workspace server. See [Personal data sync and session restoration](EYA_SESSION_AND_SYNC.md) for offline behavior, conflicts, and deployment dependencies.

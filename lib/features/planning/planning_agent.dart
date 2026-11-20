@@ -8,8 +8,9 @@ import 'planning_engine.dart';
 import 'planning_store.dart';
 
 class PlanningAgent {
-  const PlanningAgent({this.session});
+  const PlanningAgent({this.session, this.accountId});
   final AppSession? session;
+  final String? accountId;
   static const _url = String.fromEnvironment(
     'TASK_AI_URL',
     defaultValue: 'http://localhost:5141',
@@ -18,6 +19,9 @@ class PlanningAgent {
   Future<Map<String, dynamic>> _request(Map<String, Object?> payload) async {
     final account = session;
     if (account != null) {
+      if (accountId != null && account.account?.id != accountId) {
+        throw const ApiFailure(AppSession.ended, status: 401);
+      }
       return account.request('POST', '/agents/planning', payload);
     }
     final response = await http

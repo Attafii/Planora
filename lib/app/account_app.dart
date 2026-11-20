@@ -9,7 +9,7 @@ import 'theme/app_theme.dart';
 import '../features/account/account_screens.dart';
 import '../features/account/account_controls.dart';
 
-class PlanifyApp extends StatelessWidget {
+class PlanifyApp extends StatefulWidget {
   final AppSession session;
   final WidgetBuilder? workspace;
   final AppServices? services;
@@ -19,145 +19,168 @@ class PlanifyApp extends StatelessWidget {
     this.workspace,
     this.services,
   });
+
+  @override
+  State<PlanifyApp> createState() => _PlanifyAppState();
+}
+
+class _PlanifyAppState extends State<PlanifyApp> {
+  AppSession get session => widget.session;
+  WidgetBuilder? get workspace => widget.workspace;
+  AppServices? get services => widget.services;
+  String? _navigationAccount;
+  var _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: session,
-    builder: (context, _) => MaterialApp(
-      key: ValueKey(session.account != null),
-      title: 'Planify',
-      debugShowCheckedModeBanner: false,
-      theme: PlanifyTheme.build(Brightness.light),
-      darkTheme: PlanifyTheme.build(Brightness.dark),
-      themeMode: switch (session.account?.theme) {
-        'dark' => ThemeMode.dark,
-        'light' => ThemeMode.light,
-        _ => ThemeMode.system,
-      },
-      locale: Locale(session.account?.language ?? 'en'),
-      supportedLocales: const [Locale('en'), Locale('fr')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      onGenerateRoute: (settings) {
-        final path = Uri.parse(settings.name ?? '/').path;
-        if (services != null &&
-            session.account != null &&
-            const {
-              'goals',
-              'tasks',
-              'projects',
-              'invitations',
-              'assistant',
-              'achievements',
-              'challenges',
-            }.contains(path.split('/').elementAtOrNull(1))) {
-          return AppRouter.route(settings);
-        }
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (context) => ListenableBuilder(
-            listenable: session,
-            builder: (context, _) {
-              if (settings.name == '/help') {
-                return Scaffold(
-                  appBar: AppBar(title: const Text('Planify')),
-                  body: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 920),
-                        child: AccountHelpPage(
-                          session: session.account == null ? null : session,
+    builder: (context, _) {
+      final accountId = session.account?.id;
+      if (_navigationAccount != accountId) {
+        _navigationAccount = accountId;
+        _navigatorKey = GlobalKey<NavigatorState>();
+      }
+      return MaterialApp(
+        navigatorKey: _navigatorKey,
+        title: 'Planify',
+        debugShowCheckedModeBanner: false,
+        theme: PlanifyTheme.build(Brightness.light),
+        darkTheme: PlanifyTheme.build(Brightness.dark),
+        themeMode: switch (session.account?.theme) {
+          'dark' => ThemeMode.dark,
+          'light' => ThemeMode.light,
+          _ => ThemeMode.system,
+        },
+        locale: Locale(session.account?.language ?? 'en'),
+        supportedLocales: const [Locale('en'), Locale('fr')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        onGenerateRoute: (settings) {
+          final path = Uri.parse(settings.name ?? '/').path;
+          if (services != null &&
+              session.account != null &&
+              const {
+                'goals',
+                'tasks',
+                'projects',
+                'invitations',
+                'assistant',
+                'achievements',
+                'challenges',
+              }.contains(path.split('/').elementAtOrNull(1))) {
+            return AppRouter.route(settings);
+          }
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (context) => ListenableBuilder(
+              listenable: session,
+              builder: (context, _) {
+                if (settings.name == '/help') {
+                  return Scaffold(
+                    appBar: AppBar(title: const Text('Planify')),
+                    body: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 920),
+                          child: AccountHelpPage(
+                            session: session.account == null ? null : session,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                );
-              }
-              if (session.restoring) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-              if (session.restoreError != null) {
-                return Scaffold(
-                  body: Center(
-                    child: SizedBox(
-                      width: 340,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Brand(),
-                          const SizedBox(height: 32),
-                          Text(
-                            session.restoreError!,
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 24),
-                          FilledButton(
-                            onPressed: session.restore,
-                            child: const Text('Retry connection'),
-                          ),
-                          TextButton(
-                            onPressed: () async {
-                              await session.signOut();
-                              session.restoreError = null;
-                              await session.restore();
-                            },
-                            child: const Text('Return to sign in'),
-                          ),
-                        ],
+                  );
+                }
+                if (session.restoring) {
+                  return const Scaffold(
+                    body: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                if (session.restoreError != null) {
+                  return Scaffold(
+                    body: Center(
+                      child: SizedBox(
+                        width: 340,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Brand(),
+                            const SizedBox(height: 32),
+                            Text(
+                              session.restoreError!,
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 24),
+                            FilledButton(
+                              onPressed: session.restore,
+                              child: const Text('Retry connection'),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                await session.signOut();
+                                session.restoreError = null;
+                                await session.restore();
+                              },
+                              child: const Text('Return to sign in'),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                );
-              }
-              if (session.account == null) {
-                return AuthScreen(
+                  );
+                }
+                if (session.account == null) {
+                  return AuthScreen(
+                    session: session,
+                    initialMode: settings.name == '/register'
+                        ? 'register'
+                        : settings.name == '/forgot-password'
+                        ? 'forgot'
+                        : 'login',
+                  );
+                }
+                if (settings.name == '/security') {
+                  return Scaffold(
+                    appBar: AppBar(
+                      title: Text(tr(context, 'Security', 'Sécurité')),
+                      actions: [
+                        IconButton(
+                          tooltip: tr(context, 'My space', 'Mon espace'),
+                          icon: const Icon(Icons.home_outlined),
+                          onPressed: () =>
+                              Navigator.pushReplacementNamed(context, '/'),
+                        ),
+                      ],
+                    ),
+                    body: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 920),
+                          child: Entrance(
+                            child: SecurityPage(session: session),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }
+                if (workspace != null && path == '/') {
+                  return workspace!(context);
+                }
+                return AccountShell(
                   session: session,
-                  initialMode: settings.name == '/register'
-                      ? 'register'
-                      : settings.name == '/forgot-password'
-                      ? 'forgot'
-                      : 'login',
+                  initialTab: switch (settings.name) {
+                    '/preferences' => 1,
+                    '/privacy' => 2,
+                    '/analytics' => 3,
+                    _ => 0,
+                  },
                 );
-              }
-              if (settings.name == '/security') {
-                return Scaffold(
-                  appBar: AppBar(
-                    title: Text(tr(context, 'Security', 'Sécurité')),
-                    actions: [
-                      IconButton(
-                        tooltip: tr(context, 'My space', 'Mon espace'),
-                        icon: const Icon(Icons.home_outlined),
-                        onPressed: () =>
-                            Navigator.pushReplacementNamed(context, '/'),
-                      ),
-                    ],
-                  ),
-                  body: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 920),
-                        child: Entrance(child: SecurityPage(session: session)),
-                      ),
-                    ),
-                  ),
-                );
-              }
-              if (workspace != null && path == '/') return workspace!(context);
-              return AccountShell(
-                session: session,
-                initialTab: switch (settings.name) {
-                  '/preferences' => 1,
-                  '/privacy' => 2,
-                  '/analytics' => 3,
-                  _ => 0,
-                },
-              );
-            },
-          ),
-        );
-      },
-    ),
+              },
+            ),
+          );
+        },
+      );
+    },
   );
 }

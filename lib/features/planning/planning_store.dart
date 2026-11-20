@@ -82,6 +82,14 @@ class PlanningStore extends ChangeNotifier {
   final String _key;
   Map<String, DayPlan> _days = {};
   Future<void> _pending = Future.value();
+  bool _disposed = false;
+  Future<void> get settled => _pending;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 
   DayPlan day(String date) => _days[date] ?? const DayPlan();
 
@@ -94,12 +102,14 @@ class PlanningStore extends ChangeNotifier {
 
   Future<void> load() async {
     final stored = await storage.getString(_key);
-    if (stored != null) {
-      _days = (jsonDecode(stored) as Map<String, dynamic>).map(
-        (key, value) =>
-            MapEntry(key, DayPlan.fromJson(value as Map<String, dynamic>)),
-      );
-    }
+    if (_disposed) return;
+    _days = stored == null
+        ? {}
+        : (jsonDecode(stored) as Map<String, dynamic>).map(
+            (key, value) =>
+                MapEntry(key, DayPlan.fromJson(value as Map<String, dynamic>)),
+          );
+    notifyListeners();
   }
 
   int cutoffFor(String date) {
@@ -118,7 +128,7 @@ class PlanningStore extends ChangeNotifier {
         jsonEncode(next.map((k, v) => MapEntry(k, v.toJson()))),
       );
       _days = next;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     });
     _pending = write.then<void>(
       (_) {},
