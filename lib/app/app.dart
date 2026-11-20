@@ -1,136 +1,71 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 
-import '../core/services/app_session.dart';
+import 'app_services.dart';
 import 'theme/app_theme.dart';
-import '../features/account/account_screens.dart';
-import '../features/account/account_controls.dart';
+import 'feature_shell.dart';
+import 'auth_page.dart';
+import 'router/app_router.dart';
 
-class PlanifyApp extends StatelessWidget {
-  final AppSession session;
-  const PlanifyApp({super.key, required this.session});
+class PlanifyApp extends StatefulWidget {
+  const PlanifyApp({super.key, this.services});
+  final AppServices? services;
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: session,
-    builder: (context, _) => MaterialApp(
-      key: ValueKey(session.account != null),
-      title: 'Planify',
-      debugShowCheckedModeBanner: false,
-      theme: PlanifyTheme.build(Brightness.light),
-      darkTheme: PlanifyTheme.build(Brightness.dark),
-      themeMode: switch (session.account?.theme) {
-        'dark' => ThemeMode.dark,
-        'light' => ThemeMode.light,
-        _ => ThemeMode.system,
+  State<PlanifyApp> createState() => _PlanifyAppState();
+}
+
+class _PlanifyAppState extends State<PlanifyApp> {
+  late final AppServices _services;
+  String? _pendingRoute;
+  @override
+  void initState() {
+    super.initState();
+    _services = widget.services ?? AppServices();
+    _pendingRoute = WidgetsBinding.instance.platformDispatcher.defaultRouteName;
+    _services.session.initialize();
+  }
+
+  @override
+  void dispose() {
+    if (widget.services == null) {
+      _services.session.dispose();
+      _services.api.close();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AppScope(
+    services: _services,
+    child: ListenableBuilder(
+      listenable: _services.session,
+      builder: (context, child) {
+        final session = _services.session;
+        return MaterialApp(
+          key: ValueKey(session.user?.id ?? 'signed-out'),
+          title: 'Planify',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          home: session.loading
+              ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+              : session.user == null
+              ? const AuthPage()
+              : const FeatureShell(),
+          initialRoute:
+              session.user != null &&
+                  _pendingRoute != null &&
+                  _pendingRoute != '/'
+              ? _takeRoute()
+              : null,
+          onGenerateRoute: session.user == null
+              ? (_) => MaterialPageRoute<void>(builder: (_) => const AuthPage())
+              : AppRouter.route,
+        );
       },
-      locale: Locale(session.account?.language ?? 'en'),
-      supportedLocales: const [Locale('en'), Locale('fr')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      onGenerateRoute: (settings) => MaterialPageRoute<void>(
-        settings: settings,
-        builder: (context) => ListenableBuilder(
-          listenable: session,
-          builder: (context, _) {
-            if (settings.name == '/help') {
-              return Scaffold(
-                appBar: AppBar(title: const Text('Planify')),
-                body: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 920),
-                      child: AccountHelpPage(
-                        session: session.account == null ? null : session,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }
-            if (session.restoring) {
-              return const Scaffold(
-                body: Center(child: CircularProgressIndicator()),
-              );
-            }
-            if (session.restoreError != null) {
-              return Scaffold(
-                body: Center(
-                  child: SizedBox(
-                    width: 340,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Brand(),
-                        const SizedBox(height: 32),
-                        Text(
-                          session.restoreError!,
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 24),
-                        FilledButton(
-                          onPressed: session.restore,
-                          child: const Text('Retry connection'),
-                        ),
-                        TextButton(
-                          onPressed: () async {
-                            await session.signOut();
-                            session.restoreError = null;
-                            await session.restore();
-                          },
-                          child: const Text('Return to sign in'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }
-            if (session.account == null) {
-              return AuthScreen(
-                session: session,
-                initialMode: settings.name == '/register'
-                    ? 'register'
-                    : settings.name == '/forgot-password'
-                    ? 'forgot'
-                    : 'login',
-              );
-            }
-            if (settings.name == '/security') {
-              return Scaffold(
-                appBar: AppBar(
-                  title: Text(tr(context, 'Security', 'Sécurité')),
-                  actions: [
-                    IconButton(
-                      tooltip: tr(context, 'My space', 'Mon espace'),
-                      icon: const Icon(Icons.home_outlined),
-                      onPressed: () =>
-                          Navigator.pushReplacementNamed(context, '/'),
-                    ),
-                  ],
-                ),
-                body: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 920),
-                      child: Entrance(child: SecurityPage(session: session)),
-                    ),
-                  ),
-                ),
-              );
-            }
-            return AccountShell(
-              session: session,
-              initialTab: switch (settings.name) {
-                '/preferences' => 1,
-                '/privacy' => 2,
-                '/analytics' => 3,
-                _ => 0,
-              },
-            );
-          },
-        ),
-      ),
     ),
   );
+  String? _takeRoute() {
+    final route = _pendingRoute;
+    _pendingRoute = null;
+    return route;
+  }
 }

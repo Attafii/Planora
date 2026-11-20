@@ -38,6 +38,7 @@ class AppSession extends ChangeNotifier {
   bool restoring = true;
   String? restoreError;
   String? _token;
+  String? get accessToken => _token;
   Timer? _expiry;
   static const tokenKey = 'planify.session';
   AppSession({

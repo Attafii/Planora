@@ -47,12 +47,12 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Planify local backend secrets, database state and dependencies
-backend/.env
+# Planify backend state and dependencies
 backend/node_modules/
 backend/data/
+backend/.env
 backend/coverage/
-
-# Generated brand-review renders; keep source assets and approved deliverables
+# Generated brand rendering previews/cache; original deliverables stay tracked.
+assets/branding/identity-source/font-cache/
 assets/branding/identity-source/review-*.png
 assets/branding/identity-source/font*-proof.png
