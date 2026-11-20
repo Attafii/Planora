@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>C:/Users/Ahmed Attafi/Desktop/Projects/Mobile_Project/assets/branding/identity-source</dir>
+  <dir>C:/Windows/Fonts</dir>
+  <cachedir>C:/Users/Ahmed Attafi/Desktop/Projects/Mobile_Project/assets/branding/identity-source/font-cache</cachedir>
+</fontconfig>
