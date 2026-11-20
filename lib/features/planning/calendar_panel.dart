@@ -54,9 +54,11 @@ class CalendarPanel extends StatelessWidget {
     required this.onDate,
     required this.onView,
     required this.onJump,
+    this.today,
   });
 
   final DateTime date;
+  final DateTime? today;
   final CalendarView view;
   final bool enabled;
   final List<PlanBlock> Function(String) blocksFor;
@@ -75,7 +77,7 @@ class CalendarPanel extends StatelessWidget {
       view == CalendarView.month ? monthStart : date,
       firstWeekday,
     );
-    final now = DateTime.now();
+    final now = today ?? DateTime.now();
     final previous = shiftCalendarDate(date, view, -1);
     final next = shiftCalendarDate(date, view, 1);
 

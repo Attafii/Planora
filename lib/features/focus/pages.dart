@@ -517,6 +517,13 @@ class FocusTimerPage extends StatelessWidget {
                   icon: const Icon(Icons.help_outline),
                   label: const Text("I'm blocked"),
                 ),
+                if (store.onPlanRecovery case final recover?)
+                  if (s.mode != 'Stopwatch' && !breaking && remaining <= 0)
+                    TextButton.icon(
+                      onPressed: () => recover('focus-${s.id}-overrun'),
+                      icon: const Icon(Icons.event_repeat_outlined),
+                      label: const Text('Review focus overrun in Calendar'),
+                    ),
                 TextButton.icon(
                   onPressed: () => _log(c, 'Interruption'),
                   icon: const Icon(Icons.bolt_outlined),
@@ -560,7 +567,20 @@ class FocusTimerPage extends StatelessWidget {
           ? 'What is getting in the way?'
           : 'What interrupted you?',
     );
-    if (text != null && text.trim().isNotEmpty) store.log(kind, text.trim());
+    if (text == null || text.trim().isEmpty || !c.mounted) return;
+    final session = store.active;
+    if (session == null) return;
+    store.log(kind, text.trim());
+    final recover = store.onPlanRecovery;
+    if (recover != null &&
+        await confirm(
+          c,
+          'Review this disruption in Calendar?',
+          'Choose the unavailable time and review the new schedule before approving it.',
+        ) &&
+        c.mounted) {
+      recover('focus-${session.id}-${session.logs.length}');
+    }
   }
 }
 

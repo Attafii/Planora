@@ -121,6 +121,7 @@ class FocusStore extends ChangeNotifier {
   FocusStore({
     String? accountId,
     this.proposeAgent,
+    this.onPlanRecovery,
     SharedPreferencesAsync? storage,
   }) : _providedStorage = storage,
        _key = accountId == null
@@ -130,6 +131,7 @@ class FocusStore extends ChangeNotifier {
   final String _key;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
   proposeAgent;
+  final void Function(String id)? onPlanRecovery;
   bool _disposed = false;
   final notifications = NotificationService();
   final SharedPreferencesAsync? _providedStorage;

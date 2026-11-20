@@ -11,6 +11,8 @@ class PlanningAgent {
   const PlanningAgent({this.session, this.accountId});
   final AppSession? session;
   final String? accountId;
+  bool get cloudAiEnabled =>
+      session == null || session?.account?.cloudAi == true;
   static const _url = String.fromEnvironment(
     'TASK_AI_URL',
     defaultValue: 'http://localhost:5141',
@@ -21,6 +23,12 @@ class PlanningAgent {
     if (account != null) {
       if (accountId != null && account.account?.id != accountId) {
         throw const ApiFailure(AppSession.ended, status: 401);
+      }
+      if (!cloudAiEnabled) {
+        throw const ApiFailure(
+          'Cloud AI is off. Enable it in Privacy to interpret requests.',
+          status: 403,
+        );
       }
       return account.request('POST', '/agents/planning', payload);
     }
@@ -44,13 +52,15 @@ class PlanningAgent {
     String input,
     String date,
     Minutes hours,
-    int cutoff,
-  ) async {
+    int cutoff, {
+    String? timezone,
+  }) async {
     final data = await _request({
       'kind': 'interpret',
       'input': input,
       'date': date,
       'cutoff': cutoff,
+      'timezone': ?timezone,
       'workday': {'start': hours.start, 'end': hours.end},
     });
     final kind = data['kind'] as String;
