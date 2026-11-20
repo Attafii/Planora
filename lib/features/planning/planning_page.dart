@@ -446,6 +446,8 @@ class _PlanningPageState extends State<PlanningPage> {
         appBar: AppBar(
           leading: widget.embedded
               ? null
+              : Navigator.canPop(context)
+              ? const BackButton()
               : const Center(child: PlanifyMark(size: 30)),
           title: Text(widget.embedded ? 'Calendar' : 'Planify · Calendar'),
           actions: [
