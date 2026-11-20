@@ -23,6 +23,6 @@ Use the logo painter for theme-aware color. Reserve radial gradients for the tas
 
 ## Navigation
 
-The workspace uses bottom navigation on phones and a navigation rail on wide windows. Tasks and Calendar share personal planning data. Focus groups its timer, reminders, and time log. The Assistant opens conversations, proposals, and action history. More links to goals, projects, rewards, challenges, and preferences. Account settings provide System, Light and Dark appearance choices.
+The mobile workspace opens on Today, with the current or next scheduled activity, task list, day timeline and daily check-in. A translucent rounded bottom dock stays within the safe area and keeps Today, Calendar, Focus, Assistant and More within thumb reach. Tasks and Calendar share personal planning data. Focus groups its timer, reminders, and time log. The Assistant opens conversations, proposals, and action history. More links to goals, projects, rewards, challenges, and preferences. Account settings provide System, Light and Dark appearance choices.
 
 Use recognizable create and edit actions. Keep scheduling and AI changes in review until the user approves them. Show the result, any deferred work, and the reason when a plan changes.

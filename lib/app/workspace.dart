@@ -1,4 +1,9 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+
+import 'today_page.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../features/account/account_screens.dart';
@@ -39,7 +44,7 @@ class _WorkspaceState extends State<Workspace> {
   int selected = 0;
 
   static const destinations = [
-    (Icons.checklist_rounded, 'Tasks'),
+    (Icons.wb_sunny_outlined, 'Today'),
     (Icons.calendar_month_outlined, 'Calendar'),
     (Icons.timer_outlined, 'Focus'),
     (Icons.auto_awesome_outlined, 'Assistant'),
@@ -61,7 +66,6 @@ class _WorkspaceState extends State<Workspace> {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       appBar: AppBar(
         title: const Brand(),
@@ -90,60 +94,107 @@ class _WorkspaceState extends State<Workspace> {
             if (snapshot.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
-            return Row(
-              children: [
-                if (wide)
-                  NavigationRail(
-                    selectedIndex: selected,
-                    onDestinationSelected: select,
-                    extended: true,
-                    destinations: [
-                      for (final (icon, label) in destinations)
-                        NavigationRailDestination(
-                          icon: Icon(icon),
-                          label: Text(label),
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: selected == 0
+                    ? 0
+                    : MediaQuery.paddingOf(context).bottom,
+              ),
+              child: IndexedStack(
+                index: selected,
+                children: [
+                  TodayPage(
+                    tasks: tasks,
+                    planning: planning,
+                    storage: storage,
+                    accountId: widget.session.account!.id,
+                    onCalendar: () => select(1),
+                    onTasks: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => TasksPage(
+                          store: tasks,
+                          agent: TaskAgent(session: widget.session),
                         ),
-                    ],
+                      ),
+                    ),
                   ),
-                Expanded(
-                  child: IndexedStack(
-                    index: selected,
-                    children: [
-                      TasksPage(
-                        store: tasks,
-                        embedded: true,
-                        agent: TaskAgent(session: widget.session),
-                      ),
-                      PlanningPage(
-                        store: planning,
-                        embedded: true,
-                        agent: PlanningAgent(session: widget.session),
-                      ),
-                      ListenableBuilder(
-                        listenable: focus,
-                        builder: (_, _) =>
-                            MobileShell(store: focus, embedded: true),
-                      ),
-                      const ConversationsPage(embedded: true),
-                      const _MorePage(),
-                    ],
+                  PlanningPage(
+                    store: planning,
+                    embedded: true,
+                    agent: PlanningAgent(session: widget.session),
                   ),
-                ),
-              ],
+                  ListenableBuilder(
+                    listenable: focus,
+                    builder: (_, _) =>
+                        MobileShell(store: focus, embedded: true),
+                  ),
+                  const ConversationsPage(embedded: true),
+                  const _MorePage(),
+                ],
+              ),
             );
           },
         ),
       ),
-      bottomNavigationBar: wide
-          ? null
-          : NavigationBar(
-              selectedIndex: selected,
-              onDestinationSelected: select,
-              destinations: [
-                for (final (icon, label) in destinations)
-                  NavigationDestination(icon: Icon(icon), label: label),
-              ],
+      extendBody: true,
+      bottomNavigationBar: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        child: Align(
+          heightFactor: 1,
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(32),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: .12),
+                    blurRadius: 18,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(32),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface
+                          .withValues(alpha: .86),
+                      borderRadius: BorderRadius.circular(32),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
+                    child: MediaQuery.removePadding(
+                      context: context,
+                      removeBottom: true,
+                      child: NavigationBar(
+                        height: 66,
+                        elevation: 0,
+                        backgroundColor: Colors.transparent,
+                        selectedIndex: selected,
+                        onDestinationSelected: select,
+                        destinations: [
+                          for (final (icon, label) in destinations)
+                            NavigationDestination(
+                              icon: Icon(icon),
+                              label: label,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
+          ),
+        ),
+      ),
     );
   }
 

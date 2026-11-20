@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/services/app_session.dart';
@@ -410,7 +412,9 @@ class _TasksPageState extends State<TasksPage> {
                     '$status · ${task.minutes} min${task.due == null ? '' : ' · ${task.due}'}',
                   ),
                   leading: Icon(
-                    task.occurrence ? Icons.event_repeat : Icons.task_alt,
+                    task.occurrence
+                        ? Icons.event_repeat
+                        : activityIcon(task.activity),
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => detail(task),
@@ -467,10 +471,32 @@ class _TaskEditorState extends State<_TaskEditor> {
   late final minutes = TextEditingController(
     text: '${widget.task?.minutes ?? 25}',
   );
+  late ActivityType activity = widget.task?.activity ?? ActivityType.general;
   late Energy energy = widget.task?.energy ?? Energy.medium;
   late final requiredIds = {...?widget.task?.requires};
   late String? due = widget.task?.due;
   Repeat repeat = Repeat.once;
+
+  Future<void> dictate() async {
+    try {
+      final words = await const MethodChannel('planify/voice')
+          .invokeMethod<String>('dictate');
+      if (!mounted || words == null || words.trim().isEmpty) return;
+      final text = String.fromCharCodes(words.trim().runes.take(120));
+      title.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    } on PlatformException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Speech input is unavailable on this device.'),
+          ),
+        );
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -499,7 +525,17 @@ class _TaskEditorState extends State<_TaskEditor> {
               TextFormField(
                 controller: title,
                 maxLength: 120,
-                decoration: const InputDecoration(labelText: 'Title'),
+                decoration: InputDecoration(
+                  labelText: 'Title',
+                  suffixIcon:
+                      !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+                      ? IconButton(
+                          tooltip: 'Dictate task title',
+                          icon: const Icon(Icons.mic_none),
+                          onPressed: dictate,
+                        )
+                      : null,
+                ),
                 validator: (value) =>
                     value!.trim().isEmpty ? 'Enter a title.' : null,
               ),
@@ -515,6 +551,24 @@ class _TaskEditorState extends State<_TaskEditor> {
                       ? 'Use 1–1440 minutes.'
                       : null;
                 },
+              ),
+              DropdownButtonFormField<ActivityType>(
+                initialValue: activity,
+                decoration: const InputDecoration(labelText: 'Activity icon'),
+                items: [
+                  for (final type in ActivityType.values)
+                    DropdownMenuItem(
+                      value: type,
+                      child: Row(
+                        children: [
+                          Icon(activityIcon(type)),
+                          const SizedBox(width: 12),
+                          Text(type.name),
+                        ],
+                      ),
+                    ),
+                ],
+                onChanged: (value) => setState(() => activity = value!),
               ),
               DropdownButtonFormField<Energy>(
                 initialValue: energy,
@@ -599,6 +653,7 @@ class _TaskEditorState extends State<_TaskEditor> {
               'title': title.text.trim(),
               'minutes': int.parse(minutes.text),
               'energy': energy.name,
+              'activity': activity.name,
               'due': due,
               'requires': requiredIds.toList(),
             }),
@@ -728,3 +783,11 @@ class _DailyHeader extends StatelessWidget {
     );
   }
 }
+
+IconData activityIcon(ActivityType type) => switch (type) {
+  ActivityType.general => Icons.task_alt,
+  ActivityType.work => Icons.work_outline,
+  ActivityType.study => Icons.menu_book_outlined,
+  ActivityType.movement => Icons.directions_walk,
+  ActivityType.personal => Icons.spa_outlined,
+};

@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum Energy { low, medium, high }
 
+enum ActivityType { general, work, study, movement, personal }
+
 enum Repeat { once, daily, weekly }
 
 String dayKey(DateTime day) => day.toIso8601String().substring(0, 10);
@@ -14,6 +16,7 @@ class Task {
     required this.id,
     required this.title,
     this.minutes = 25,
+    this.activity = ActivityType.general,
     this.energy = Energy.medium,
     this.due,
     this.done = false,
@@ -28,6 +31,11 @@ class Task {
   factory Task.fromJson(Map<String, dynamic> row) => Task(
     id: row['id'] as String,
     title: row['title'] as String,
+    activity:
+        ActivityType.values
+            .where((type) => type.name == row['activity'])
+            .firstOrNull ??
+        ActivityType.general,
     minutes: row['minutes'] as int,
     energy: Energy.values.byName(row['energy'] as String),
     due: row['due'] as String?,
@@ -43,6 +51,7 @@ class Task {
   final String id, title;
   final int minutes;
   final Energy energy;
+  final ActivityType activity;
   final String? due, parent, until, seriesId;
   final bool done, skipped;
   final List<String> requires;
@@ -55,6 +64,7 @@ class Task {
     'title': title,
     'minutes': minutes,
     'energy': energy.name,
+    'activity': activity.name,
     'due': due,
     'done': done,
     'skipped': skipped,
@@ -268,6 +278,7 @@ class TaskStore extends ChangeNotifier {
           'title': task.title,
           'minutes': task.minutes,
           'energy': task.energy.name,
+          'activity': task.activity.name,
           'requires': task.requires,
         });
       }
