@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
 import 'focus_store.dart';
+import 'focus_task_link.dart';
 import 'smart_tools.dart';
 
 String clock(int seconds) {
@@ -97,17 +98,55 @@ class EmptyPanel extends StatelessWidget {
   );
 }
 
-void openFocus(BuildContext c, FocusStore s) => Navigator.push(
-  c,
-  MaterialPageRoute(
-    builder: (_) =>
-        s.active == null ? FocusSetup(store: s) : FocusTimerPage(store: s),
-  ),
+void openFocus(
+  BuildContext context,
+  FocusStore store, {
+  ScheduledFocus? scheduled,
+  Widget? syncStatus,
+}) {
+  final active = store.active;
+  final resume =
+      active != null &&
+      (scheduled == null || scheduled.sameSlot(active.scheduled));
+  Navigator.push<void>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => resume
+          ? FocusTimerPage(
+              store: store,
+              sessionId: active.id,
+              syncStatus: syncStatus,
+            )
+          : FocusSetup(
+              store: store,
+              scheduled: scheduled,
+              syncStatus: syncStatus,
+            ),
+    ),
+  );
+}
+
+Widget _focusSaveStatus(FocusStore store, Widget? syncStatus) => Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    ?syncStatus,
+    if (store.saving) const Text('Saving on this device…'),
+    if (store.error case final error?)
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        title: Text(error),
+        trailing: TextButton(
+          onPressed: store.save,
+          child: const Text('Retry save'),
+        ),
+      ),
+  ],
 );
 
 class FocusLanding extends StatelessWidget {
-  const FocusLanding({super.key, required this.store});
+  const FocusLanding({super.key, required this.store, this.syncStatus});
   final FocusStore store;
+  final Widget? syncStatus;
   @override
   Widget build(BuildContext c) => ListView(
     padding: const EdgeInsets.all(22),
@@ -156,7 +195,7 @@ class FocusLanding extends StatelessWidget {
       ),
       const SizedBox(height: 28),
       FilledButton.icon(
-        onPressed: () => openFocus(c, store),
+        onPressed: () => openFocus(c, store, syncStatus: syncStatus),
         icon: const Icon(Icons.play_arrow_rounded),
         label: Text(
           store.active == null ? 'Set up a session' : 'Continue your session',
@@ -176,7 +215,7 @@ class FocusLanding extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           IconButton(
-            onPressed: () => openFocus(c, store),
+            onPressed: () => openFocus(c, store, syncStatus: syncStatus),
             tooltip: 'Use adaptive focus duration',
             icon: const Icon(Icons.arrow_forward_rounded, size: 20),
           ),
@@ -203,8 +242,15 @@ class FocusLanding extends StatelessWidget {
 }
 
 class FocusSetup extends StatefulWidget {
-  const FocusSetup({super.key, required this.store});
+  const FocusSetup({
+    super.key,
+    required this.store,
+    this.scheduled,
+    this.syncStatus,
+  });
   final FocusStore store;
+  final ScheduledFocus? scheduled;
+  final Widget? syncStatus;
   @override
   State<FocusSetup> createState() => _FocusSetupState();
 }
@@ -214,10 +260,64 @@ class _FocusSetupState extends State<FocusSetup> {
   final title = TextEditingController();
   String mode = 'Countdown';
   int minutes = 25;
+  late ScheduledFocus? slot;
+  String? startError;
+
+  String? get slotIssue {
+    final scheduled = slot;
+    if (scheduled == null) return null;
+    try {
+      final taskContext = widget.store.taskContext;
+      if (taskContext == null) return 'The focus workspace is unavailable.';
+      taskContext.eligibleTask(scheduled);
+      return null;
+    } on StateError catch (error) {
+      return error.message;
+    }
+  }
+
+  void openTimer(BuildContext context, FocusSession session) {
+    Navigator.pushReplacement<void, void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FocusTimerPage(
+          store: widget.store,
+          sessionId: session.id,
+          syncStatus: widget.syncStatus,
+        ),
+      ),
+    );
+  }
+
+  void begin(BuildContext context) {
+    if (!form.currentState!.validate()) return;
+    if (widget.store.active != null) {
+      setState(
+        () => startError = 'Continue or finish the active session first.',
+      );
+      return;
+    }
+    try {
+      final selected = slot;
+      if (selected == null) {
+        widget.store.start(title.text, minutes, mode);
+      } else {
+        widget.store.startScheduled(selected, minutes, mode);
+      }
+      if (widget.store.active case final session?) openTimer(context, session);
+    } on StateError catch (error) {
+      setState(() => startError = error.message);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    minutes = adaptiveMinutes(widget.store.sessions);
+    slot = widget.scheduled;
+    final selected = slot;
+    minutes = selected == null
+        ? adaptiveMinutes(widget.store.sessions)
+        : (selected.end - selected.start).clamp(1, 120);
   }
 
   @override
@@ -227,136 +327,184 @@ class _FocusSetupState extends State<FocusSetup> {
   }
 
   @override
-  Widget build(BuildContext c) => Scaffold(
-    appBar: AppBar(title: const Text('A fresh start')),
-    body: Form(
-      key: form,
-      child: ListView(
-        padding: const EdgeInsets.all(22),
-        children: [
-          Text(
-            'One thing\nat a time.',
-            style: Theme.of(c).textTheme.headlineLarge,
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Name what you want to give your attention to.',
-            style: TextStyle(color: Color(0xFF637083)),
-          ),
-          const SizedBox(height: 28),
-          TextFormField(
-            controller: title,
-            maxLength: 100,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'What are you working on?',
-              hintText: 'e.g. Read a chapter',
-            ),
-            validator: (v) => v == null || v.trim().isEmpty
-                ? 'Give your session a name'
-                : null,
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'YOUR FOCUS STYLE',
-            style: TextStyle(
-              fontSize: 12,
-              letterSpacing: 1.2,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
-          RadioGroup<String>(
-            groupValue: mode,
-            onChanged: (v) => setState(() {
-              mode = v!;
-              if (mode == 'Pomodoro') minutes = 25;
-            }),
-            child: Column(
-              children: ['Countdown', 'Pomodoro', 'Stopwatch']
-                  .map(
-                    (m) => RadioListTile<String>(
-                      value: m,
-                      title: Text(m),
-                      subtitle: Text(
-                        m == 'Pomodoro'
-                            ? '25-minute blocks with optional 5-minute breaks'
-                            : m == 'Countdown'
-                            ? 'A clear target, with room to extend'
-                            : 'No time pressure. Just begin.',
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-          if (mode != 'Stopwatch') ...[
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '$minutes minutes',
-                    style: Theme.of(c).textTheme.titleLarge,
-                  ),
+  Widget build(BuildContext c) => ListenableBuilder(
+    listenable: Listenable.merge([
+      widget.store,
+      widget.store.taskContext?.tasks,
+      widget.store.taskContext?.plan,
+    ]),
+    builder: (c, _) {
+      final selected = slot;
+      final task = selected == null
+          ? null
+          : widget.store.taskContext?.tasks.get(selected.taskId);
+      final issue = slotIssue;
+      final active = widget.store.active;
+      return Scaffold(
+        appBar: AppBar(title: const Text('A fresh start')),
+        body: Form(
+          key: form,
+          child: ListView(
+            padding: const EdgeInsets.all(22),
+            children: [
+              Text(
+                'One thing\nat a time.',
+                style: Theme.of(c).textTheme.headlineLarge,
+              ),
+              const SizedBox(height: 12),
+              _focusSaveStatus(widget.store, widget.syncStatus),
+              if (selected != null) ...[
+                Text(
+                  task?.title ?? 'Scheduled task',
+                  style: Theme.of(c).textTheme.titleLarge,
                 ),
-                ActionChip(
-                  avatar: const Icon(Icons.tune, size: 16),
-                  label: Text(
-                    'Suggested ${adaptiveMinutes(widget.store.sessions)}m',
+                Text(selected.label),
+                Text('${selected.end - selected.start} min scheduled'),
+                const Text('You can start before the scheduled time.'),
+                if (issue != null) ...[
+                  Text(issue),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      slot = null;
+                      startError = null;
+                      title.text = task?.title ?? '';
+                      minutes = minutes.clamp(5, 120);
+                    }),
+                    child: const Text('Use unassigned focus'),
                   ),
-                  onPressed: () => setState(
-                    () => minutes = adaptiveMinutes(widget.store.sessions),
+                  TextButton(
+                    onPressed: () => Navigator.pop(c),
+                    child: const Text('Back to plan'),
                   ),
+                ],
+              ] else ...[
+                const Text(
+                  'Name what you want to give your attention to.',
+                  style: TextStyle(color: Color(0xFF637083)),
+                ),
+                const SizedBox(height: 28),
+                TextFormField(
+                  controller: title,
+                  maxLength: 100,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'What are you working on?',
+                    hintText: 'e.g. Read a chapter',
+                  ),
+                  validator: (v) => v == null || v.trim().isEmpty
+                      ? 'Give your session a name'
+                      : null,
                 ),
               ],
-            ),
-            Slider(
-              value: minutes.toDouble(),
-              min: 5,
-              max: 120,
-              divisions: 23,
-              label: '$minutes min',
-              onChanged: (v) => setState(() => minutes = v.round()),
-            ),
-          ],
-          const SizedBox(height: 30),
-          FilledButton.icon(
-            onPressed: () {
-              if (!form.currentState!.validate()) return;
-              if (widget.store.active != null) {
-                Navigator.pop(c);
-                return;
-              }
-              widget.store.start(title.text, minutes, mode);
-              Navigator.pushReplacement(
-                c,
-                MaterialPageRoute(
-                  builder: (_) => FocusTimerPage(store: widget.store),
+              if (startError != null && startError != issue) Text(startError!),
+              if (active != null) ...[
+                Text('There is an active session for ${active.title}.'),
+                TextButton(
+                  onPressed: () => openTimer(c, active),
+                  child: const Text('Continue active session'),
                 ),
-              );
-            },
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('Begin focus'),
+              ],
+              const SizedBox(height: 20),
+              const Text(
+                'YOUR FOCUS STYLE',
+                style: TextStyle(
+                  fontSize: 12,
+                  letterSpacing: 1.2,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              RadioGroup<String>(
+                groupValue: mode,
+                onChanged: (v) => setState(() {
+                  mode = v!;
+                  if (mode == 'Pomodoro') minutes = 25;
+                }),
+                child: Column(
+                  children: ['Countdown', 'Pomodoro', 'Stopwatch']
+                      .map(
+                        (m) => RadioListTile<String>(
+                          value: m,
+                          title: Text(m),
+                          subtitle: Text(
+                            m == 'Pomodoro'
+                                ? '25-minute blocks with optional 5-minute breaks'
+                                : m == 'Countdown'
+                                ? 'A clear target, with room to extend'
+                                : 'No time pressure. Just begin.',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+              if (mode != 'Stopwatch') ...[
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$minutes minutes',
+                        style: Theme.of(c).textTheme.titleLarge,
+                      ),
+                    ),
+                    ActionChip(
+                      avatar: const Icon(Icons.tune, size: 16),
+                      label: Text(
+                        'Suggested ${adaptiveMinutes(widget.store.sessions)}m',
+                      ),
+                      onPressed: () => setState(
+                        () => minutes = adaptiveMinutes(widget.store.sessions),
+                      ),
+                    ),
+                  ],
+                ),
+                Slider(
+                  value: minutes.toDouble(),
+                  min: selected == null ? 5 : 1,
+                  max: 120,
+                  divisions: selected == null ? 23 : 119,
+                  label: '$minutes min',
+                  onChanged: (v) => setState(() => minutes = v.round()),
+                ),
+              ],
+              const SizedBox(height: 30),
+              FilledButton.icon(
+                onPressed: issue != null || active != null
+                    ? null
+                    : () => begin(c),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Begin focus'),
+              ),
+            ],
           ),
-        ],
-      ),
-    ),
+        ),
+      );
+    },
   );
 }
 
 class FocusTimerPage extends StatelessWidget {
-  const FocusTimerPage({super.key, required this.store});
+  const FocusTimerPage({
+    super.key,
+    required this.store,
+    this.sessionId,
+    this.syncStatus,
+  });
   final FocusStore store;
+  final String? sessionId;
+  final Widget? syncStatus;
   @override
   Widget build(BuildContext c) => AnimatedBuilder(
     animation: store,
     builder: (c, _) {
       final s = store.active;
-      if (s == null) {
+      if (s == null || (sessionId != null && sessionId != s.id)) {
         return Scaffold(
           appBar: AppBar(),
-          body: const Center(child: Text('No active session.')),
+          body: const Center(
+            child: Text('This focus session is no longer active.'),
+          ),
         );
       }
       final elapsed = s.elapsed(store.now);
@@ -378,6 +526,7 @@ class FocusTimerPage extends StatelessWidget {
         body: ListView(
           padding: const EdgeInsets.all(24),
           children: [
+            _focusSaveStatus(store, syncStatus),
             const SizedBox(height: 20),
             Text(
               s.title,
@@ -385,12 +534,10 @@ class FocusTimerPage extends StatelessWidget {
               style: Theme.of(c).textTheme.headlineMedium,
             ),
             const SizedBox(height: 12),
+            if (s.scheduled case final slot?)
+              Text(slot.label, textAlign: TextAlign.center),
             Text(
-              '${s.mode} · ${breaking
-                  ? 'Break'
-                  : s.status == 'paused'
-                  ? 'Paused'
-                  : 'In progress'}',
+              '${s.mode} · ${s.statusLabel}',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Color(0xFF637083)),
             ),
@@ -488,18 +635,7 @@ class FocusTimerPage extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             OutlinedButton(
-              onPressed: () {
-                final result = store.finish();
-                if (result != null) {
-                  Navigator.pushReplacement(
-                    c,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          SessionDetail(store: store, session: result),
-                    ),
-                  );
-                }
-              },
+              onPressed: () => _finish(c, s),
               child: const Text('Finish session'),
             ),
             const SizedBox(height: 18),
@@ -535,15 +671,16 @@ class FocusTimerPage extends StatelessWidget {
               onPressed: () async {
                 if (await confirm(
                   c,
-                  'Cancel this session?',
-                  'Your recorded focus time will remain in the time log.',
+                  'Abandon this session?',
+                  'Your recorded time will remain in the time log. The task will stay open.',
                 )) {
-                  store.finish(cancelled: true);
-                  if (c.mounted) Navigator.pop(c);
+                  if (!c.mounted || store.active?.id != s.id) return;
+                  final result = store.finish(cancelled: true);
+                  if (result != null) _reflection(c, result);
                 }
               },
               child: const Text(
-                'Cancel session',
+                'Abandon session',
                 style: TextStyle(color: Color(0xFF637083)),
               ),
             ),
@@ -552,6 +689,50 @@ class FocusTimerPage extends StatelessWidget {
       );
     },
   );
+  Future<void> _finish(BuildContext context, FocusSession session) async {
+    final early =
+        session.mode != 'Stopwatch' &&
+        session.elapsed(store.currentTime) < session.minutes * 60;
+    if (early) {
+      final end = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('End focus early?'),
+          content: const Text(
+            'Your active focus time will be saved. You can continue the work later.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('Keep focusing'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('End early'),
+            ),
+          ],
+        ),
+      );
+      if (end != true) return;
+    }
+    if (!context.mounted || store.active?.id != session.id) return;
+    final result = store.finish();
+    if (result != null) _reflection(context, result);
+  }
+
+  void _reflection(BuildContext context, FocusSession result) {
+    Navigator.pushReplacement<void, void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SessionDetail(
+          store: store,
+          session: result,
+          syncStatus: syncStatus,
+        ),
+      ),
+    );
+  }
+
   Future<void> _notes(BuildContext c, FocusSession s) async {
     final value = await textPrompt(c, 'Session notes', initial: s.notes);
     if (value != null) {
@@ -637,8 +818,9 @@ Future<bool> confirm(BuildContext c, String title, String body) async =>
     false;
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({super.key, required this.store});
+  const HistoryPage({super.key, required this.store, this.syncStatus});
   final FocusStore store;
+  final Widget? syncStatus;
   @override
   State<HistoryPage> createState() => _HistoryPageState();
 }
@@ -651,6 +833,7 @@ class _HistoryPageState extends State<HistoryPage> {
         .where(
           (s) =>
               s.finished &&
+              widget.store.hasSavedFinish(s.id) &&
               (filter == 'All' ||
                   (filter == 'Today'
                       ? DateUtils.isSameDay(s.created, DateTime.now())
@@ -663,6 +846,7 @@ class _HistoryPageState extends State<HistoryPage> {
     return ListView(
       padding: const EdgeInsets.all(22),
       children: [
+        _focusSaveStatus(widget.store, widget.syncStatus),
         const SizedBox(height: 16),
         Text(
           'Your time,\nwell spent.',
@@ -728,12 +912,18 @@ class _HistoryPageState extends State<HistoryPage> {
               ),
             ),
             title: Text(s.title),
-            subtitle: Text('${dayLabel(s.created)} · ${s.status}'),
-            trailing: Text('${s.seconds ~/ 60} min'),
+            subtitle: Text(
+              '${dayLabel(s.created)} · ${s.statusLabel}${s.interrupted ? ' · Interrupted' : ''}',
+            ),
+            trailing: Text(clock(s.seconds)),
             onTap: () => Navigator.push(
               c,
               MaterialPageRoute(
-                builder: (_) => SessionDetail(store: widget.store, session: s),
+                builder: (_) => SessionDetail(
+                  store: widget.store,
+                  session: s,
+                  syncStatus: widget.syncStatus,
+                ),
               ),
             ),
           ),
@@ -744,116 +934,227 @@ class _HistoryPageState extends State<HistoryPage> {
 }
 
 class SessionDetail extends StatefulWidget {
-  const SessionDetail({super.key, required this.store, required this.session});
+  const SessionDetail({
+    super.key,
+    required this.store,
+    required this.session,
+    this.syncStatus,
+  });
   final FocusStore store;
   final FocusSession session;
+  final Widget? syncStatus;
   @override
   State<SessionDetail> createState() => _SessionDetailState();
 }
 
 class _SessionDetailState extends State<SessionDetail> {
-  @override
-  Widget build(BuildContext c) {
-    final s = widget.session;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Session reflection')),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          const SizedBox(height: 16),
-          const Icon(
-            Icons.verified_outlined,
-            size: 52,
-            color: Color(0xFF146C52),
+  bool markingDone = false;
+  String? taskError;
+
+  Future<void> markDone(FocusSession session) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Mark the linked task done?'),
+        content: Text(session.title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Keep open'),
           ),
-          const SizedBox(height: 20),
-          Text(
-            s.status == 'cancelled'
-                ? 'Every minute counts.'
-                : 'A little progress.\nA good feeling.',
-            textAlign: TextAlign.center,
-            style: Theme.of(c).textTheme.headlineMedium,
-          ),
-          const SizedBox(height: 14),
-          Text(s.title, textAlign: TextAlign.center),
-          const SizedBox(height: 28),
-          Row(
-            children: [
-              Expanded(
-                child: Metric(
-                  value: '${s.seconds ~/ 60} min',
-                  label: 'Actual focus',
-                  icon: Icons.timelapse,
-                  color: const Color(0xFFE3F8F3),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Metric(
-                  value: s.mode == 'Stopwatch' ? '—' : '${s.minutes} min',
-                  label: 'Time target',
-                  icon: Icons.flag_outlined,
-                  color: const Color(0xFFEAF2FF),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Text(
-            '${dayLabel(s.created)} · ${timeLabel(s.created)} – ${timeLabel(s.ended ?? s.created)}',
-            style: const TextStyle(color: Color(0xFF637083)),
-          ),
-          if (s.status == 'completed')
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('I completed what I set out to do'),
-              subtitle: const Text(
-                'Saved with this session; task status will connect later.',
-              ),
-              value: s.taskCompleted,
-              onChanged: (v) => setState(() {
-                s.taskCompleted = v!;
-                widget.store.save();
-              }),
-            ),
-          sectionTitle(
-            c,
-            'Notes',
-            action: 'Edit',
-            onTap: () async {
-              final note = await textPrompt(c, 'Reflection', initial: s.notes);
-              if (note != null && mounted) {
-                setState(() {
-                  s.notes = note;
-                  widget.store.save();
-                });
-              }
-            },
-          ),
-          Text(
-            s.notes.isEmpty ? 'What helped you focus today?' : s.notes,
-            style: const TextStyle(color: Color(0xFF637083), height: 1.7),
-          ),
-          const SizedBox(height: 24),
-          if (s.logs.isNotEmpty) ...[
-            sectionTitle(c, 'Along the way'),
-            ...s.logs.map(
-              (l) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.short_text),
-                title: Text(l),
-              ),
-            ),
-          ],
-          const SizedBox(height: 24),
           FilledButton(
-            onPressed: () => Navigator.pop(c),
-            child: const Text('Back to my day'),
+            onPressed: () => Navigator.pop(dialog, true),
+            child: const Text('Mark done'),
           ),
         ],
       ),
     );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      markingDone = true;
+      taskError = null;
+    });
+    try {
+      await widget.store.completeLinkedTask(session.id);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          taskError = error is StateError
+              ? error.message
+              : 'Could not mark the task done. Try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => markingDone = false);
+    }
   }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([
+      widget.store,
+      widget.store.taskContext?.tasks,
+    ]),
+    builder: (context, _) {
+      final store = widget.store;
+      final session = store.sessions
+          .where((entry) => entry.id == widget.session.id)
+          .firstOrNull;
+      final theme = Theme.of(context);
+      if (session == null) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Session reflection')),
+          body: const Center(
+            child: Text('This session is unavailable in the current history.'),
+          ),
+        );
+      }
+      final slot = session.scheduled;
+      final tasks = store.taskContext?.tasks;
+      final task = slot == null ? null : tasks?.get(slot.taskId);
+      final done = task != null && tasks!.completed(task);
+      final saved = store.hasSavedFinish(session.id);
+      return Scaffold(
+        appBar: AppBar(title: const Text('Session reflection')),
+        body: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            _focusSaveStatus(store, widget.syncStatus),
+            const SizedBox(height: 16),
+            Icon(
+              session.status == 'cancelled'
+                  ? Icons.stop_circle_outlined
+                  : Icons.verified_outlined,
+              size: 52,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              session.statusLabel,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.headlineMedium,
+            ),
+            const SizedBox(height: 14),
+            Text(session.title, textAlign: TextAlign.center),
+            if (session.interrupted)
+              const Text('Interruption recorded', textAlign: TextAlign.center),
+            if (slot != null) Text(slot.label, textAlign: TextAlign.center),
+            const SizedBox(height: 28),
+            Row(
+              children: [
+                Expanded(
+                  child: Metric(
+                    value: clock(session.seconds),
+                    label: 'Actual focus (min:sec)',
+                    icon: Icons.timelapse,
+                    color: const Color(0xFFE3F8F3),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Metric(
+                    value: session.mode == 'Stopwatch'
+                        ? '—'
+                        : '${session.minutes} min',
+                    label: 'Time target',
+                    icon: Icons.flag_outlined,
+                    color: const Color(0xFFEAF2FF),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            Text(
+              '${dayLabel(session.created)} · ${timeLabel(session.created)} – ${timeLabel(session.ended ?? session.created)}',
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            if (slot != null) ...[
+              if (!saved)
+                const Text('Save the session before updating its linked task.')
+              else if (session.status == 'cancelled')
+                const Text('Abandoned time stays in the time log.')
+              else if (task == null || task.skipped)
+                const Text(
+                  'The linked task is unavailable. This session stays in the time log.',
+                )
+              else ...[
+                Text(
+                  done
+                      ? 'Linked task is done.'
+                      : 'Focus time recorded. The linked task is open.',
+                ),
+                if (!done)
+                  FilledButton.tonal(
+                    onPressed: markingDone ? null : () => markDone(session),
+                    child: Text(
+                      markingDone ? 'Saving task…' : 'Mark task done',
+                    ),
+                  ),
+              ],
+              if (taskError case final error?) Text(error),
+            ] else if (session.status != 'cancelled')
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('I completed what I set out to do'),
+                subtitle: const Text('Saved as a reflection on this session.'),
+                value: session.taskCompleted,
+                onChanged: (value) {
+                  session.taskCompleted = value!;
+                  store.save();
+                },
+              ),
+            sectionTitle(
+              context,
+              'Notes',
+              action: 'Edit',
+              onTap: () async {
+                final note = await textPrompt(
+                  context,
+                  'Reflection',
+                  initial: session.notes,
+                );
+                if (note == null ||
+                    !mounted ||
+                    !store.sessions.any((item) => identical(item, session))) {
+                  return;
+                }
+                session.notes = note;
+                store.save();
+              },
+            ),
+            Text(
+              session.notes.isEmpty
+                  ? 'What helped you focus today?'
+                  : session.notes,
+              style: TextStyle(
+                color: theme.colorScheme.onSurfaceVariant,
+                height: 1.7,
+              ),
+            ),
+            const SizedBox(height: 24),
+            if (session.logs.isNotEmpty) ...[
+              sectionTitle(context, 'Along the way'),
+              for (final entry in session.logs)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.short_text),
+                  title: Text(entry),
+                ),
+            ],
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(
+                slot != null && !done && session.status != 'cancelled'
+                    ? 'Continue later'
+                    : 'Back to my day',
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 class RemindersPage extends StatefulWidget {

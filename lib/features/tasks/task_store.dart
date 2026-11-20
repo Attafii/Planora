@@ -402,6 +402,18 @@ class TaskStore extends ChangeNotifier {
     }
   });
 
+  Future<void> markDone(String id) => _write((next) {
+    final current = get(id);
+    if (current == null || current.skipped) {
+      throw StateError('This task is no longer available.');
+    }
+    if (completed(current)) return;
+    if (children(id).isNotEmpty || !ready(current)) {
+      throw StateError('Complete the prerequisites or subtasks first.');
+    }
+    next[id] = current.patch({'done': true});
+  });
+
   Future<void> toggle(Task task) => _write((next) {
     final current = get(task.id);
     if (current == null ||

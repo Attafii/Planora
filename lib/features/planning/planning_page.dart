@@ -22,12 +22,14 @@ class PlanningPage extends StatefulWidget {
     this.agent = const PlanningAgent(),
     this.initialInterruptionId,
     this.syncStatus,
+    this.onStartFocus,
   });
   final PlanningStore store;
   final bool embedded;
   final PlanningAgent agent;
   final String? initialInterruptionId;
   final Widget? syncStatus;
+  final void Function(String date, PlanBlock block)? onStartFocus;
 
   @override
   State<PlanningPage> createState() => _PlanningPageState();
@@ -656,6 +658,7 @@ class _PlanningPageState extends State<PlanningPage> {
   }
 
   Future<void> showBlock(PlanBlock block, bool canManage) async {
+    final selectedDate = date;
     final action = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -670,6 +673,12 @@ class _PlanningPageState extends State<PlanningPage> {
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
           ),
+          if (block.kind == BlockKind.task && widget.onStartFocus != null)
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(context, 'focus'),
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Start focus'),
+            ),
           if (canManage) ...[
             TextButton(
               onPressed: () => Navigator.pop(context, 'remove'),
@@ -683,6 +692,7 @@ class _PlanningPageState extends State<PlanningPage> {
         ],
       ),
     );
+    if (action == 'focus' && mounted) widget.onStartFocus!(selectedDate, block);
     if (action == 'edit' && mounted) await run(() => editReserved(block));
     if (action == 'remove' && mounted) await run(() => removeReserved(block));
   }

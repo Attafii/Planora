@@ -6,7 +6,13 @@ import '../features/home/home_page.dart';
 import 'theme/app_colors.dart';
 
 class MobileShell extends StatefulWidget {
-  const MobileShell({super.key, required this.store, this.embedded = false});
+  const MobileShell({
+    super.key,
+    required this.store,
+    this.embedded = false,
+    this.syncStatus,
+  });
+  final Widget? syncStatus;
   final FocusStore store;
   final bool embedded;
   @override
@@ -89,12 +95,13 @@ class _MobileShellState extends State<MobileShell> {
                 children: [
                   HomePage(
                     store: s,
-                    onFocus: () => openFocus(context, s),
+                    onFocus: () =>
+                        openFocus(context, s, syncStatus: widget.syncStatus),
                     onReminders: () => setState(() => index = 2),
                   ),
-                  FocusLanding(store: s),
+                  FocusLanding(store: s, syncStatus: widget.syncStatus),
                   RemindersPage(store: s),
-                  HistoryPage(store: s),
+                  HistoryPage(store: s, syncStatus: widget.syncStatus),
                 ],
               ),
             ),
@@ -102,7 +109,8 @@ class _MobileShellState extends State<MobileShell> {
               Material(
                 color: ink,
                 child: InkWell(
-                  onTap: () => openFocus(context, s),
+                  onTap: () =>
+                      openFocus(context, s, syncStatus: widget.syncStatus),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,

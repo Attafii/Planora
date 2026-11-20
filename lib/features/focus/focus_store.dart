@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/services/notification_service.dart';
 import '../../core/services/personal_sync.dart';
+import 'focus_task_link.dart';
 
 String newId() => DateTime.now().microsecondsSinceEpoch.toString();
 
@@ -24,6 +25,8 @@ class FocusSession {
     this.logs = const [],
     this.ended,
     this.taskCompleted = false,
+    this.scheduled,
+    this.accumulatedMillis,
   });
   String id, title, mode, status, notes;
   int minutes, seconds;
@@ -31,12 +34,29 @@ class FocusSession {
   DateTime? anchor, breakUntil, ended;
   List<String> logs;
   bool taskCompleted;
-  int elapsed(DateTime now) =>
-      seconds +
-      (anchor == null
+  final ScheduledFocus? scheduled;
+  int? accumulatedMillis;
+
+  int elapsedMillis(DateTime now) =>
+      (accumulatedMillis ?? seconds * 1000) +
+      (anchor == null || status != 'running'
           ? 0
-          : now.difference(anchor!).inSeconds.clamp(0, 1 << 31));
-  bool get finished => status == 'completed' || status == 'cancelled';
+          : now.difference(anchor!).inMilliseconds.clamp(0, 2147483648000));
+  int elapsed(DateTime now) => elapsedMillis(now) ~/ 1000;
+  bool get finished =>
+      status == 'completed' || status == 'endedEarly' || status == 'cancelled';
+  bool get interrupted => logs.any(
+    (entry) =>
+        entry.startsWith('Interruption:') || entry.startsWith('Blocked:'),
+  );
+  String get statusLabel => switch (status) {
+    'completed' => 'Completed',
+    'endedEarly' => 'Ended early',
+    'cancelled' => 'Abandoned',
+    'paused' => interrupted ? 'Paused · Interrupted' : 'Paused',
+    'break' => 'Break',
+    _ => 'In progress',
+  };
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
@@ -51,6 +71,8 @@ class FocusSession {
     'logs': logs,
     'ended': ended?.toUtc().toIso8601String(),
     'taskCompleted': taskCompleted,
+    if (scheduled != null) 'scheduled': scheduled!.toJson(),
+    if (accumulatedMillis != null) 'accumulatedMillis': accumulatedMillis,
   };
   factory FocusSession.fromJson(Map<String, dynamic> j) => FocusSession(
     id: j['id'],
@@ -66,6 +88,10 @@ class FocusSession {
     logs: List<String>.from(j['logs']),
     ended: DateTime.tryParse(j['ended'] ?? '')?.toLocal(),
     taskCompleted: j['taskCompleted'] ?? false,
+    accumulatedMillis: j['accumulatedMillis'] as int?,
+    scheduled: j['scheduled'] == null
+        ? null
+        : ScheduledFocus.fromJson(j['scheduled'] as Map<String, dynamic>),
   );
 }
 
@@ -122,8 +148,12 @@ class FocusStore extends ChangeNotifier {
     String? accountId,
     this.proposeAgent,
     this.onPlanRecovery,
+    this.taskContext,
     SharedPreferencesAsync? storage,
-  }) : _providedStorage = storage,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now,
+       now = (clock ?? DateTime.now)(),
+       _providedStorage = storage,
        _key = accountId == null
            ? 'planify.oumayma.v1'
            : 'planify.oumayma.v1.$accountId';
@@ -141,11 +171,51 @@ class FocusStore extends ChangeNotifier {
   List<String> inbox = [];
   String? error;
   bool ready = false;
-  DateTime now = DateTime.now();
+  final DateTime Function() _clock;
+  final FocusTaskContext? taskContext;
+  DateTime now;
+  DateTime get currentTime => _clock();
   Timer? _ticker;
   Future<void> _writes = Future.value();
   FocusSession? get active => sessions.where((s) => !s.finished).firstOrNull;
   Future<void> get settled => _writes;
+  int _saveGeneration = 0;
+  bool saving = false;
+  Map<String, ({String? taskId, int seconds})> _savedSessions = {};
+
+  bool hasSavedFinish(String id) => _savedSessions.containsKey(id);
+
+  int recordedSecondsFor(Set<String> taskIds) => _savedSessions.values
+      .where((record) => taskIds.contains(record.taskId))
+      .fold<int>(0, (total, record) => total + record.seconds);
+
+  Map<String, ({String? taskId, int seconds})> _finishedSnapshot() => {
+    for (final session in sessions)
+      if (session.finished)
+        session.id: (
+          taskId: session.status == 'cancelled'
+              ? null
+              : session.scheduled?.taskId,
+          seconds: session.seconds,
+        ),
+  };
+
+  Future<void> completeLinkedTask(String id) async {
+    final session = sessions.where((item) => item.id == id).firstOrNull;
+    final slot = session?.scheduled;
+    if (_disposed ||
+        session == null ||
+        slot == null ||
+        taskContext == null ||
+        !session.finished ||
+        session.status == 'cancelled' ||
+        !hasSavedFinish(id)) {
+      throw StateError(
+        'Save the finished focus session before marking its task done.',
+      );
+    }
+    await taskContext!.tasks.markDone(slot.taskId);
+  }
 
   Future<void> clearDeviceAlerts() async {
     try {
@@ -180,6 +250,7 @@ class FocusStore extends ChangeNotifier {
   Future<void> load() async {
     suspend();
     error = null;
+    now = _clock();
     try {
       final raw = await _prefs.getString(_key);
       if (raw != null) {
@@ -200,6 +271,7 @@ class FocusStore extends ChangeNotifier {
       if (_prefs is SyncedPreferences) rethrow;
       error = 'Saved data could not be loaded. Restart before making changes.';
     }
+    _savedSessions = _finishedSnapshot();
     try {
       if (!ready) await notifications.init();
     } catch (_) {
@@ -217,8 +289,9 @@ class FocusStore extends ChangeNotifier {
     }
     if (_disposed) return;
     ready = true;
+    _scheduleTimer();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      now = DateTime.now();
+      now = _clock();
       final s = active;
       if (s != null &&
           s.status == 'running' &&
@@ -245,17 +318,49 @@ class FocusStore extends ChangeNotifier {
       'reminders': reminders.map((r) => r.toJson()).toList(),
       'inbox': inbox,
     });
-    _writes = _writes.then((_) => _prefs.setString(_key, raw)).catchError((
-      Object e,
-    ) {
-      error = 'Changes could not be saved. Check device storage.';
-      if (!_disposed) notifyListeners();
+    final recorded = _finishedSnapshot();
+    final generation = ++_saveGeneration;
+    saving = true;
+    _writes = _writes.then((_) async {
+      try {
+        await _prefs.setString(_key, raw);
+        _savedSessions = recorded;
+        if (generation == _saveGeneration) error = null;
+      } catch (_) {
+        if (generation == _saveGeneration) {
+          error = 'Changes could not be saved. Check device storage.';
+        }
+      } finally {
+        if (generation == _saveGeneration) saving = false;
+        if (!_disposed) notifyListeners();
+      }
     });
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   void start(String title, int minutes, String mode) {
-    if (active != null) return;
+    if (active != null || _disposed) return;
+    _start(title, minutes, mode);
+  }
+
+  FocusSession startScheduled(ScheduledFocus slot, int minutes, String mode) {
+    if (active != null) {
+      throw StateError('Continue or finish the active session first.');
+    }
+    if (_disposed || taskContext == null) {
+      throw StateError('The focus workspace is unavailable.');
+    }
+    final task = taskContext!.eligibleTask(slot);
+    return _start(task.title, minutes, mode, scheduled: slot);
+  }
+
+  FocusSession _start(
+    String title,
+    int minutes,
+    String mode, {
+    ScheduledFocus? scheduled,
+  }) {
+    now = _clock();
     sessions.insert(
       0,
       FocusSession(
@@ -263,16 +368,20 @@ class FocusStore extends ChangeNotifier {
         title: title.trim(),
         mode: mode,
         minutes: minutes,
-        created: DateTime.now(),
-        anchor: DateTime.now(),
+        created: now,
+        anchor: now,
+        scheduled: scheduled,
       ),
     );
     save();
     _scheduleTimer();
+    return sessions.first;
   }
 
-  void _capture(FocusSession s) {
-    s.seconds = s.elapsed(DateTime.now());
+  void _capture(FocusSession s, [DateTime? instant]) {
+    now = instant ?? _clock();
+    s.accumulatedMillis = s.elapsedMillis(now);
+    s.seconds = s.accumulatedMillis! ~/ 1000;
     s.anchor = null;
   }
 
@@ -287,23 +396,23 @@ class FocusStore extends ChangeNotifier {
 
   void resume() {
     final s = active;
-    if (s == null) return;
+    if (s == null || (s.status != 'paused' && s.status != 'break')) return;
     if (s.status == 'break' && s.mode == 'Pomodoro') {
       s.minutes = (s.seconds / 60).ceil() + 25;
     }
     s.breakUntil = null;
     s.status = 'running';
-    s.anchor = DateTime.now();
+    s.anchor = now = _clock();
     save();
     _scheduleTimer();
   }
 
   void takeBreak() {
     final s = active;
-    if (s == null) return;
+    if (s == null || s.status != 'running') return;
     _capture(s);
     s.status = 'break';
-    s.breakUntil = DateTime.now().add(const Duration(minutes: 5));
+    s.breakUntil = now.add(const Duration(minutes: 5));
     save();
     unawaited(notifications.timer(s.breakUntil!, 'Your break is complete'));
   }
@@ -333,9 +442,15 @@ class FocusStore extends ChangeNotifier {
   FocusSession? finish({bool cancelled = false}) {
     final s = active;
     if (s == null) return null;
-    _capture(s);
-    s.status = cancelled ? 'cancelled' : 'completed';
-    s.ended = DateTime.now();
+    final ended = _clock();
+    _capture(s, ended);
+    s.status = cancelled
+        ? 'cancelled'
+        : s.mode != 'Stopwatch' && s.seconds < s.minutes * 60
+        ? 'endedEarly'
+        : 'completed';
+    s.ended = ended;
+    s.breakUntil = null;
     save();
     unawaited(notifications.cancelTimer());
     return s;
@@ -344,11 +459,12 @@ class FocusStore extends ChangeNotifier {
   void _scheduleTimer() {
     final s = active;
     if (s == null || s.status != 'running' || s.mode == 'Stopwatch') return;
-    final left = s.minutes * 60 - s.elapsed(DateTime.now());
+    final instant = _clock();
+    final left = s.minutes * 60 - s.elapsed(instant);
     if (left > 0) {
       unawaited(
         notifications.timer(
-          DateTime.now().add(Duration(seconds: left)),
+          instant.add(Duration(seconds: left)),
           'Your focus time is complete',
         ),
       );
