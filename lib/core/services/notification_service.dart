@@ -6,6 +6,17 @@ import 'package:timezone/timezone.dart' as tz;
 
 class NotificationService {
   final plugin = FlutterLocalNotificationsPlugin();
+  static Future<void> _pendingAlerts = Future.value();
+
+  Future<void> _queue(Future<void> Function() operation) {
+    final result = _pendingAlerts.then((_) => operation());
+    _pendingAlerts = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
+  }
+
   bool initialized = false;
   String message = 'Enable notifications to receive reminders outside the app.';
   String? openedReminder;
@@ -78,7 +89,7 @@ class NotificationService {
     DateTime when,
     String repeat,
     bool enabled,
-  ) async {
+  ) => _queue(() async {
     if (!initialized) return;
     try {
       await plugin.cancel(id: id(key));
@@ -100,11 +111,15 @@ class NotificationService {
     } catch (_) {
       message = 'Reminder saved, but its device alert could not be scheduled.';
     }
-  }
+  });
 
-  Future<void> cancel(String key) async {
+  Future<void> cancel(String key) => _queue(() async {
     if (initialized) await plugin.cancel(id: id(key));
-  }
+  });
+
+  Future<void> clearDeviceAlerts() => _queue(() async {
+    if (supported) await plugin.cancelAll();
+  });
 
   Future<void> timer(DateTime when, String title) =>
       schedule('2000000001', title, when, 'Once', true);

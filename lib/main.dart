@@ -29,9 +29,10 @@ class PlanifyRoot extends StatefulWidget {
 
 class _PlanifyRootState extends State<PlanifyRoot> {
   final accountSession = account.AppSession(baseUrl: ApiClient().baseUrl);
-  late final services = AppServices(
-    client: ApiClient(baseUrl: accountSession.baseUrl),
-  );
+  late AppServices services = newServices();
+
+  AppServices newServices() =>
+      AppServices(client: ApiClient(baseUrl: accountSession.baseUrl));
 
   @override
   void initState() {
@@ -42,8 +43,16 @@ class _PlanifyRootState extends State<PlanifyRoot> {
 
   void syncAccount() {
     final user = accountSession.account;
-    services.api.token = accountSession.accessToken;
-    services.api.onUnauthorized = accountSession.restore;
+    final token = user == null ? null : accountSession.accessToken;
+    if (services.api.token != token) {
+      services.api.token = null;
+      services.api.onUnauthorized = null;
+      services.api.close();
+      services.session.dispose();
+      setState(() => services = newServices());
+    }
+    services.api.token = token;
+    services.api.onUnauthorized = accountSession.invalidateSession;
     services.session.user = user == null
         ? null
         : AuthUser.fromJson({
