@@ -169,6 +169,17 @@ class _PlanifyAppState extends State<PlanifyApp> {
                 }
                 return AccountShell(
                   session: session,
+                  onHome: workspace == null
+                      ? null
+                      : () {
+                          final navigator = Navigator.of(context);
+                          var foundHome = false;
+                          navigator.popUntil((route) {
+                            foundHome = route.settings.name == '/';
+                            return foundHome || route.isFirst;
+                          });
+                          if (!foundHome) navigator.pushReplacementNamed('/');
+                        },
                   initialTab: switch (settings.name) {
                     '/preferences' => 1,
                     '/privacy' => 2,

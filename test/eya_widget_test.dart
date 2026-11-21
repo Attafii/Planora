@@ -24,6 +24,60 @@ Map<String, dynamic> account({
   'preferences': {'theme': theme, 'cloud_ai': false},
 };
 void main() {
+  testWidgets(
+    'account Home returns to Today without signing out, including direct entry',
+    (tester) async {
+      final requests = <http.Request>[];
+      final session =
+          AppSession(
+              client: MockClient((request) async {
+                requests.add(request);
+                return http.Response(
+                  jsonEncode({'notices': [], 'checks': [], 'ready': true}),
+                  200,
+                );
+              }),
+            )
+            ..restoring = false
+            ..account = Account.fromJson(account());
+      addTearDown(session.dispose);
+      for (final size in [const Size(390, 844), const Size(1200, 1000)]) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        await tester.pumpWidget(
+          PlanifyApp(
+            session: session,
+            workspace: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => Navigator.pushNamed(context, '/account'),
+                child: const Text('Home workspace'),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Home workspace'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Back to Home'));
+        await tester.pumpAndSettle();
+        expect(find.text('Home workspace'), findsOneWidget);
+        final navigator = tester.state<NavigatorState>(
+          find.byType(Navigator).first,
+        );
+        navigator.pushNamedAndRemoveUntil('/preferences', (_) => false);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Back to Home'));
+        await tester.pumpAndSettle();
+        expect(find.text('Home workspace'), findsOneWidget);
+        expect(session.account?.id, 'eya');
+        expect(requests.where((r) => r.url.path == '/auth/logout'), isEmpty);
+        expect(tester.takeException(), isNull);
+      }
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+    },
+  );
+
   test(
     'registration sends the device IANA zone or UTC when unsupported',
     () async {

@@ -579,7 +579,13 @@ class Notice extends StatelessWidget {
 class AccountShell extends StatefulWidget {
   final AppSession session;
   final int initialTab;
-  const AccountShell({super.key, required this.session, this.initialTab = 0});
+  final VoidCallback? onHome;
+  const AccountShell({
+    super.key,
+    required this.session,
+    this.initialTab = 0,
+    this.onHome,
+  });
   @override
   State<AccountShell> createState() => _AccountShellState();
 }
@@ -708,6 +714,23 @@ class _AccountShellState extends State<AccountShell> {
             Expanded(
               child: Column(
                 children: [
+                  if (widget.onHome != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(wide ? 44 : 20, 8, 20, 0),
+                        child: TextButton.icon(
+                          onPressed: widget.onHome,
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                          ),
+                          icon: const Icon(Icons.arrow_back_rounded),
+                          label: Text(
+                            tr(context, 'Back to Home', 'Retour à l’accueil'),
+                          ),
+                        ),
+                      ),
+                    ),
                   Padding(
                     padding: EdgeInsets.symmetric(
                       horizontal: wide ? 44 : 20,
