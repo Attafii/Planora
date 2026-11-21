@@ -60,6 +60,7 @@ class _PlanifyRootState extends State<PlanifyRoot> {
             'name': user.name,
             'email': user.email,
             'timezone': user.timezone,
+            'preferences': {'cloud_ai': user.cloudAi},
           });
   }
 

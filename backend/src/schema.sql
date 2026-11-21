@@ -122,3 +122,7 @@ CREATE INDEX IF NOT EXISTS proposals_owner ON proposals(owner_id,created_at);
 
 -- Shared request budget; counts provider calls, not user messages.
 CREATE TABLE IF NOT EXISTS ai_daily_usage (day DATE PRIMARY KEY, requests INTEGER NOT NULL CHECK(requests >= 0));
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS charts JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS assistant_turns (conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE, request_id TEXT NOT NULL, message TEXT NOT NULL, response JSONB NOT NULL, PRIMARY KEY(conversation_id,request_id));

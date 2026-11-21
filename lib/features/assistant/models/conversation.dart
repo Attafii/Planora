@@ -22,8 +22,10 @@ class AgentMessage {
   AgentMessage.fromJson(JsonMap d)
     : id = d['id'] as String,
       role = d['role'] as String,
-      body = d['body'] as String;
+      body = d['body'] as String,
+      charts = ((d['charts'] as List?) ?? []).cast<JsonMap>();
   final String id, role, body;
+  final List<JsonMap> charts;
 }
 
 class AgentProposal {

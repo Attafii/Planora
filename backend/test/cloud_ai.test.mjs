@@ -6,6 +6,7 @@ import { openDatabase } from '../src/database.mjs';
 import { createApp } from '../src/app.mjs';
 
 let provider, api, db, base, payload, token, conversation;
+let toolReply = false;
 let status = 200, content = '{"message":"A clear next step.","actions":[]}', delay = 0;
 const previous = Object.fromEntries(['AI_BASE_URL', 'AI_MODEL', 'AI_API_KEY'].map(key => [key, process.env[key]]));
 const messages = [{ role: 'user', content: 'Summarize my QA work.' }];
@@ -24,7 +25,7 @@ before(async () => {
     payload = JSON.parse(body);
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    res.end(JSON.stringify({ choices: [{ message: toolReply && !payload.messages.some(m=>m.role==='tool') ? {role:'assistant',tool_calls:[{id:'read-1',type:'function',function:{name:'read_workspace',arguments:'{}'}}]} : { content } }] }));
   }).listen(0, '127.0.0.1');
   await new Promise(resolve => provider.once('listening', resolve));
   process.env.AI_BASE_URL = `http://127.0.0.1:${provider.address().port}`;
@@ -77,4 +78,21 @@ test('slow provider requests produce a specific recoverable timeout', async () =
   delay = 100;
   await assert.rejects(cloudAnswer(messages, { timeoutMs: 10 }), error => error.status === 504 && error.code === 'ai_timeout');
   delay = 0;
+});
+
+test('agent reads bounded tools and uses prior conversation; charts survive a lost-response retry',async()=>{
+ content='{"message":"Your recorded work is available.","actions":[]}';
+ toolReply=true;let reads=0;
+ const result=await cloudAnswer(messages,{tools:[{type:'function',function:{name:'read_workspace',parameters:{type:'object',properties:{}}}}],readTool:async(name,input)=>{assert.equal(name,'read_workspace');assert.deepEqual(input,{});reads++;return {total:7};}});
+ assert.equal(reads,1);assert.equal(result.message,'Your recorded work is available.');assert.equal(JSON.parse(payload.messages.at(-1).content).total,7);
+ toolReply=false;
+ const body={conversation_id:conversation,message:'Show a chart of my tasks',use_cloud:true,request_id:'synthetic-retry-id-0001'};
+ const sent=await request('/assistant/messages',body);assert.equal(sent.status,200);
+ assert.ok(payload.messages.some(m=>m.role==='user'&&m.content==='Summarize my QA work.'));
+ assert.equal(sent.data.charts[0].key,'workspace_tasks');
+ content='invalid output must never be requested';
+ assert.deepEqual((await request('/assistant/messages',body)).data,sent.data);
+ const saved=(await request(`/assistant/conversations/${conversation}`)).data;
+ assert.equal(saved.messages.filter(m=>m.body===body.message).length,1);
+ assert.equal(saved.messages.at(-1).charts[0].key,'workspace_tasks');
 });

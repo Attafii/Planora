@@ -9,7 +9,10 @@ import '../models/conversation.dart';
 
 String actionLabel(String kind) =>
     const {
-      'create_task': 'Create task',
+      'create_task': 'Create workspace task',
+      'create_personal_task': 'Create a task in My tasks',
+      'complete_personal_task': 'Mark personal task complete',
+      'create_calendar_event': 'Add calendar commitment or break',
       'create_goal': 'Create goal',
       'build_goal_plan': 'Create milestones and linked tasks',
       'create_milestones': 'Add milestones',
@@ -23,6 +26,7 @@ String actionLabel(String kind) =>
     kind.replaceAll('_', ' ');
 bool editableAction(String kind) => [
   'create_task',
+  'create_personal_task',
   'create_goal',
   'build_goal_plan',
   'create_milestones',
@@ -56,10 +60,12 @@ class _ActionEditorState extends State<_ActionEditor> {
     _payload = jsonDecode(jsonEncode(widget.action.payload)) as JsonMap;
     _title = TextEditingController(text: _payload['title'] as String?);
     _date = TextEditingController(
-      text: (_payload['target_date'] ?? _payload['deadline']) as String?,
+      text:
+          (_payload['target_date'] ?? _payload['deadline'] ?? _payload['due'])
+              as String?,
     );
     _minutes = TextEditingController(
-      text: '${_payload['estimated_minutes'] ?? 45}',
+      text: '${_payload['estimated_minutes'] ?? _payload['minutes'] ?? 45}',
     );
     _body = TextEditingController(
       text: (_payload['body'] ?? _payload['description']) as String?,
@@ -98,6 +104,7 @@ class _ActionEditorState extends State<_ActionEditor> {
     final kind = widget.action.kind;
     if ([
       'create_task',
+      'create_personal_task',
       'create_goal',
       'build_goal_plan',
       'update_task',
@@ -105,12 +112,18 @@ class _ActionEditorState extends State<_ActionEditor> {
       _payload['title'] = _title.text.trim();
       _payload[kind == 'create_goal' || kind == 'build_goal_plan'
           ? 'target_date'
+          : kind == 'create_personal_task'
+          ? 'due'
           : 'deadline'] = _date.text.isEmpty
           ? null
           : _date.text;
     }
-    if (['create_task', 'update_task'].contains(kind)) {
-      _payload['estimated_minutes'] = int.parse(_minutes.text);
+    if (['create_task', 'update_task', 'create_personal_task'].contains(kind)) {
+      _payload[kind == 'create_personal_task'
+          ? 'minutes'
+          : 'estimated_minutes'] = int.parse(
+        _minutes.text,
+      );
     }
     if (kind == 'create_goal') _payload['description'] = _body.text;
     if (kind == 'add_comment') _payload['body'] = _body.text;
@@ -171,6 +184,7 @@ class _ActionEditorState extends State<_ActionEditor> {
               const SizedBox(height: 24),
               if ([
                 'create_task',
+                'create_personal_task',
                 'create_goal',
                 'build_goal_plan',
                 'update_task',
@@ -193,7 +207,11 @@ class _ActionEditorState extends State<_ActionEditor> {
                 ),
                 const SizedBox(height: 16),
               ],
-              if (['create_task', 'update_task'].contains(kind)) ...[
+              if ([
+                'create_task',
+                'update_task',
+                'create_personal_task',
+              ].contains(kind)) ...[
                 TextFormField(
                   controller: _minutes,
                   validator: Validators.minutes,

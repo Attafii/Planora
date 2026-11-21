@@ -107,6 +107,7 @@ export function createApi({ accountDb = null, database = resolve('backend/data/p
       if (path === '/health' && req.method === 'GET') return send(200, { status: 'ok' });
       if (workspace && /^\/(goals|tasks|projects|invitations|assistant|gamification|achievements|challenges|integrations)(\/|$)/.test(path)) {
         const profile = path.startsWith('/integrations/') ? null : (await user((await identity(req)).id));
+        if (profile && path.startsWith('/assistant/')) profile.personalCollections = Object.fromEntries((await db.prepare('SELECT collection,revision,snapshot FROM personal_sync WHERE user_id=?').all(profile.id)).map(row => [row.collection, row]));
         return workspace(req, res, profile, profile && /^\/goals(?:\/|$)/.test(path)
           ? (await db.prepare("SELECT snapshot FROM personal_sync WHERE user_id=? AND collection='tasks'").get(profile.id))?.snapshot
           : undefined);

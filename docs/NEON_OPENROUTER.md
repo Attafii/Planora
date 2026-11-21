@@ -49,7 +49,7 @@ completion prices to zero. There is no paid fallback.
 AI_DAILY_LIMIT defaults to 1000 and cannot exceed 1000. An atomic Neon counter
 limits calls across server instances, accounts and features. Each provider call
 counts, including tool rounds and failed attempts; an interaction can consume
-multiple requests. No automatic retry spends extra calls. Quota reservations
+multiple requests. The conversational agent may spend one extra call correcting malformed output within its bounded deadline; it never retries writes automatically. Quota reservations
 remain counted after provider failure. OpenRouter can apply a lower remaining
 allowance if other applications share the key or impose per-minute/provider limits.
 The key metadata endpoint confirmed a 1000/day allowance during verification.

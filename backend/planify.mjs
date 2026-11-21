@@ -26,7 +26,7 @@ export function createPlanifyServer(db, options = {}) {
          ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, timezone=EXCLUDED.timezone`,
         [profile.id, profile.name, profile.email, 'external-account', profile.timezone, profile.created_at],
       );
-      return { ...profile, cloudAi: profile.preferences.cloud_ai, personalTasks: personalTaskView(tasksSnapshot) };
+      return { ...profile, cloudAi: profile.preferences.cloud_ai, personalCollections: profile.personalCollections, personalActions: Boolean(process.env.DATABASE_URL), personalTasks: personalTaskView(profile.personalCollections?.tasks?.snapshot ?? tasksSnapshot) };
     },
   });
 

@@ -14,8 +14,10 @@ class AuthUser {
     : id = d['id'] as String,
       name = d['name'] as String,
       email = d['email'] as String,
-      timezone = d['timezone'] as String;
+      timezone = d['timezone'] as String,
+      cloudAi = (d['preferences'] as Map?)?['cloud_ai'] == true;
   final String id, name, email, timezone;
+  final bool cloudAi;
 }
 
 class AppSession extends ChangeNotifier {

@@ -1,9 +1,12 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../models/conversation.dart';
 import 'proposal_page.dart';
+import 'message_chart.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key, required this.id});
@@ -16,8 +19,17 @@ class _ChatPageState extends State<ChatPage> {
   final _view = GlobalKey<AsyncViewState<Conversation>>(),
       _input = TextEditingController(),
       _scroll = ScrollController();
-  bool _sending = false, _cloud = false;
-  String? _sendError;
+  bool _sending = false, _cloud = false, _modeInitialized = false;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_modeInitialized) {
+      _cloud = AppScope.of(context).session.user?.cloudAi ?? false;
+      _modeInitialized = true;
+    }
+  }
+
+  String? _sendError, _requestId, _requestText;
   @override
   void dispose() {
     _input.dispose();
@@ -28,15 +40,25 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _send() async {
     final message = _input.text.trim();
     if (message.isEmpty || _sending) return;
+    if (_requestText != message || _requestId == null) {
+      _requestText = message;
+      final random = Random.secure();
+      _requestId = List.generate(
+        16,
+        (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ).join();
+    }
     setState(() {
       _sending = true;
       _sendError = null;
     });
     try {
       await AppScope.of(context).assistant
-          .send(widget.id, message, cloud: _cloud);
+          .send(widget.id, message, cloud: _cloud, requestId: _requestId);
       if (!mounted) return;
       _input.clear();
+      _requestId = null;
+      _requestText = null;
       _view.currentState?.refresh();
     } catch (e) {
       if (mounted) setState(() => _sendError = e.toString());
@@ -46,6 +68,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _mode() async {
+    _requestId = null;
     if (_cloud) {
       setState(() {
         _cloud = false;
@@ -56,7 +79,7 @@ class _ChatPageState extends State<ChatPage> {
     if (await confirm(
       context,
       title: 'Use cloud AI?',
-      message: 'Your message and authorized goal/task context will be sent to the configured AI provider. Approval is still required before product changes. Local mode keeps the conversation on this server.',
+      message: 'Your conversation and authorized task, goal, calendar, project and activity context will be sent to the configured AI provider. Approval is still required before product changes. Local mode keeps the conversation on this server.',
       action: 'Use cloud AI',
     )) {
       if (mounted) setState(() => _cloud = true);
@@ -66,7 +89,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) => ProductPage(
     title: 'Planify assistant',
-    subtitle: 'Your work. Your approval.',
+    subtitle: 'Ask, explore, and turn plans into approved actions.',
     actions: [
       OutlinedButton(
         onPressed: _sending ? null : _mode,
@@ -116,7 +139,7 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                           const SizedBox(height: 12),
                           const Text(
-                            'Local mode prepares structured outlines and summaries using rules. Cloud mode requires a configured provider.',
+                            'Use Cloud AI to chat, explore your synced work, see charts, and prepare actions. Enable Cloud AI in Privacy first. Local mode offers basic rules without a model.',
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 24),
@@ -127,7 +150,9 @@ class _ChatPageState extends State<ChatPage> {
                             children: [
                               for (final s in [
                                 'Plan four chapters before Friday, maximum two hours per day',
-                                'Summarize my work',
+                                'Show a chart of my task progress',
+                                'What should I focus on next?',
+                                'Help me create a calendar commitment',
                                 'Create task: draft an introduction',
                               ])
                                 ActionChip(
@@ -169,18 +194,26 @@ class _ChatPageState extends State<ChatPage> {
                                                 .outlineVariant,
                                           ),
                                   ),
-                                  child: SelectableText(
-                                    m.body,
-                                    style: TextStyle(
-                                      color: m.role == 'user'
-                                          ? Theme.of(context)
-                                                .colorScheme
-                                                .onPrimary
-                                          : Theme.of(context)
-                                                .colorScheme
-                                                .onSurface,
-                                      height: 1.5,
-                                    ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      SelectableText(
+                                        m.body,
+                                        style: TextStyle(
+                                          color: m.role == 'user'
+                                              ? Theme.of(context)
+                                                    .colorScheme
+                                                    .onPrimary
+                                              : Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurface,
+                                          height: 1.5,
+                                        ),
+                                      ),
+                                      for (final chart in m.charts)
+                                        MessageChart(data: chart),
+                                    ],
                                   ),
                                 ),
                               ),

@@ -30,12 +30,17 @@ class AssistantRepository {
       Conversation.fromJson(await api.get('/assistant/conversations/$id'));
   Future<void> deleteConversation(String id) =>
       api.delete('/assistant/conversations/$id');
-  Future<JsonMap> send(String id, String message, {bool cloud = false}) =>
-      api.post('/assistant/messages', {
-        'conversation_id': id,
-        'message': message,
-        'use_cloud': cloud,
-      }, cloud ? const Duration(seconds: 75) : const Duration(seconds: 35));
+  Future<JsonMap> send(
+    String id,
+    String message, {
+    bool cloud = false,
+    String? requestId,
+  }) => api.post('/assistant/messages', {
+    'conversation_id': id,
+    'message': message,
+    'use_cloud': cloud,
+    'request_id': ?requestId,
+  }, cloud ? const Duration(seconds: 75) : const Duration(seconds: 35));
   Future<AgentProposal> decompose(String id, {int steps = 4}) async =>
       AgentProposal.fromJson(
         await api.post('/goals/$id/ai-decomposition', {'steps': steps}),

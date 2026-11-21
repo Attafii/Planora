@@ -311,8 +311,22 @@ class _ActionSummary extends StatelessWidget {
             },
             builder: (ctx, label, _) => Text(label),
           ),
+        if (p['personal_task_id'] != null)
+          Text(
+            'Personal task: ${p['personal_task_title'] ?? p['personal_task_id']}',
+          ),
+        if (p['minutes'] != null) Text('Estimate: ${p['minutes']} minutes'),
         if (p['date'] != null) Text('Calendar date: ${p['date']}'),
+        if (p['start'] is int && p['end'] is int)
+          Text(
+            'Time: ${_clock(p['start'] as int)} – ${_clock(p['end'] as int)} · ${p['kind']} · ${p['timezone'] ?? 'saved account timezone'}',
+          ),
+        if (action.kind == 'create_calendar_event')
+          const Text('Existing calendar blocks are checked again at approval.'),
       ],
     );
   }
 }
+
+String _clock(int minute) =>
+    "${(minute ~/ 60).toString().padLeft(2, '0')}:${(minute % 60).toString().padLeft(2, '0')}";

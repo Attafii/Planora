@@ -24,3 +24,10 @@ Accounts, sessions and personal sync now join goals/projects on Neon when
 DATABASE_URL is configured. All AI provider adapters enforce free OpenRouter
 models and share a persistent daily request budget. See
 [Neon and OpenRouter](NEON_OPENROUTER.md) for migration results and verification.
+
+## Conversational agent
+
+The assistant now retains conversation context, reads authorized workspace data,
+shows server-calculated charts and prepares personal task/calendar actions through
+the existing approval and sync contracts. See [Conversational agent](CONVERSATIONAL_AGENT.md)
+for supported actions, provider limits and verification.
