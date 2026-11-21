@@ -26,10 +26,12 @@ function allowed(body, keys) { if (Object.keys(body).some(key => !keys.includes(
 
 function policyFile(path) { return path ? JSON.parse(readFileSync(path, 'utf8')) : null; }
 
-export function createApi({ database = resolve('backend/data/planify.sqlite'), sessionMs = 7 * 86400000, clock = Date.now, activitySource = null, workspace = null, proposeAgent = null, dataPolicy = policyFile(process.env.ACCOUNT_DATA_POLICY_FILE), aiPolicy = policyFile(process.env.INSIGHTS_AI_POLICY_FILE), origins = ['http://localhost:5173', 'http://127.0.0.1:5173'] } = {}) {
-  if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
-  const db = new DatabaseSync(database);
-  db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
+export function createApi({ accountDb = null, database = resolve('backend/data/planify.sqlite'), sessionMs = 7 * 86400000, clock = Date.now, activitySource = null, workspace = null, proposeAgent = null, dataPolicy = policyFile(process.env.ACCOUNT_DATA_POLICY_FILE), aiPolicy = policyFile(process.env.INSIGHTS_AI_POLICY_FILE), origins = ['http://localhost:5173', 'http://127.0.0.1:5173'] } = {}) {
+  if (!accountDb && database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
+  const db = accountDb || new DatabaseSync(database);
+  let controls;
+  const ready = (async () => {
+  (await db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;
     CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, email_verified_at TEXT, password_hash TEXT NOT NULL, salt TEXT NOT NULL, timezone TEXT NOT NULL, language TEXT NOT NULL DEFAULT 'en', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS preferences (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, theme TEXT NOT NULL DEFAULT 'system', cloud_ai INTEGER NOT NULL DEFAULT 0, consent_version TEXT, consent_updated_at TEXT);
     CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires_at INTEGER NOT NULL);
@@ -38,7 +40,9 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       collection TEXT NOT NULL, revision INTEGER NOT NULL, snapshot TEXT NOT NULL,
       PRIMARY KEY (user_id, collection)
-    );`);
+    );`));
+  controls = await accountControls({ db, clock, derivePassword, activitySource, dataPolicy, aiPolicy });
+  })();
   const limits = new Map();
   // Password work has bounded concurrency as well as per-address rate limits.
   let activeHashes = 0;
@@ -47,9 +51,8 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
     activeHashes++;
     try { return await derive(value, salt, 64); } finally { activeHashes--; }
   }
-  const controls = accountControls({ db, clock, derivePassword, activitySource, dataPolicy, aiPolicy });
-  const cleanup = setInterval(() => controls.sweep(), 1000);
-  cleanup.unref();
+
+
   function rateLimit(req) {
     const key = req.socket.remoteAddress;
     const time = clock();
@@ -58,33 +61,34 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
     item.count++; limits.set(key, item);
     if (item.count > 20) throw new ApiError(429, 'rate_limited', 'Too many attempts. Try again in a minute.');
   }
-  function user(id) {
-    const u = db.prepare('SELECT id,name,email,email_verified_at,timezone,language,created_at,updated_at FROM users WHERE id=?').get(id);
-    const p = db.prepare('SELECT theme,cloud_ai,consent_version,consent_updated_at FROM preferences WHERE user_id=?').get(id);
+  async function user(id) {
+    const u = (await db.prepare('SELECT id,name,email,email_verified_at,timezone,language,created_at,updated_at FROM users WHERE id=?').get(id));
+    const p = (await db.prepare('SELECT theme,cloud_ai,consent_version,consent_updated_at FROM preferences WHERE user_id=?').get(id));
     return { ...u, preferences: { ...p, cloud_ai: Boolean(p.cloud_ai) } };
   }
-  function identity(req) {
+  async function identity(req) {
     const token = req.headers.authorization?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-    const s = token && db.prepare('SELECT id,user_id,expires_at,last_used_at FROM sessions WHERE token_hash=?').get(hash(token));
+    const s = token && (await db.prepare('SELECT id,user_id,expires_at,last_used_at FROM sessions WHERE token_hash=?').get(hash(token)));
     if (!s || s.expires_at <= clock()) {
-      if (token) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash(token));
+      if (token) (await db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash(token)));
       throw new ApiError(401, 'unauthorized', 'Your session has ended. Please sign in again.');
     }
-    if (!s.last_used_at || clock() - s.last_used_at >= 60000) db.prepare('UPDATE sessions SET last_used_at=? WHERE id=?').run(clock(), s.id);
+    if (!s.last_used_at || clock() - s.last_used_at >= 60000) (await db.prepare('UPDATE sessions SET last_used_at=? WHERE id=?').run(clock(), s.id));
     return { id: s.user_id, token, sessionId: s.id };
   }
-  function startSession(id, req) {
-    db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(clock());
+  async function startSession(id, req) {
+    (await db.prepare('DELETE FROM sessions WHERE expires_at<=?').run(clock()));
     const token = randomBytes(32).toString('hex');
     const expires = clock() + sessionMs;
     const agent = String(req.headers['user-agent'] ?? '');
     const platform = /Android/i.test(agent) ? 'Android' : /iPhone|iPad/i.test(agent) ? 'iOS' : /Windows/i.test(agent) ? 'Windows' : /Mac/i.test(agent) ? 'macOS' : /Linux/i.test(agent) ? 'Linux' : 'Device';
     const browser = agent.includes('Edg/') ? 'Edge' : agent.includes('Chrome/') ? 'Chrome' : agent.includes('Firefox/') ? 'Firefox' : agent.includes('Safari/') ? 'Safari' : 'Planify app';
-    db.prepare('INSERT INTO sessions (token_hash,user_id,expires_at,id,created_at,last_used_at,device) VALUES (?,?,?,?,?,?,?)').run(hash(token), id, expires, randomUUID(), clock(), clock(), platform + ' · ' + browser);
-    controls.notice(id, 'new_session');
-    return { token, expires_at: new Date(expires).toISOString(), user: user(id) };
+    (await db.prepare('INSERT INTO sessions (token_hash,user_id,expires_at,id,created_at,last_used_at,device) VALUES (?,?,?,?,?,?,?)').run(hash(token), id, expires, randomUUID(), clock(), clock(), platform + ' · ' + browser));
+    (await controls.notice(id, 'new_session'));
+    return { token, expires_at: new Date(expires).toISOString(), user: (await user(id)) };
   }
-  const server = http.createServer(async (req, res) => {
+  const handler = async (req, res) => {
+    await ready;
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -96,15 +100,15 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
     try {
       if (origin && !origins.includes(origin)) throw new ApiError(403, 'origin', 'Origin is not allowed.');
       if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
-      controls.sweep();
+      (await controls.sweep());
       const url = new URL(req.url, 'http://localhost');
       const path = url.pathname;
       const syncCollection = path.match(/^\/users\/me\/sync\/(tasks|planning|focus|check-ins)$/)?.[1];
       if (path === '/health' && req.method === 'GET') return send(200, { status: 'ok' });
       if (workspace && /^\/(goals|tasks|projects|invitations|assistant|gamification|achievements|challenges|integrations)(\/|$)/.test(path)) {
-        const profile = path.startsWith('/integrations/') ? null : user(identity(req).id);
+        const profile = path.startsWith('/integrations/') ? null : (await user((await identity(req)).id));
         return workspace(req, res, profile, profile && /^\/goals(?:\/|$)/.test(path)
-          ? db.prepare("SELECT snapshot FROM personal_sync WHERE user_id=? AND collection='tasks'").get(profile.id)?.snapshot
+          ? (await db.prepare("SELECT snapshot FROM personal_sync WHERE user_id=? AND collection='tasks'").get(profile.id))?.snapshot
           : undefined);
       }
       if (path.startsWith('/auth/') && req.method === 'POST') rateLimit(req);
@@ -124,7 +128,7 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
         if (!body || Array.isArray(body) || typeof body !== 'object') fail('Expected an object.');
       }
       if (proposeAgent && req.method === 'POST' && ['/agents/tasks', '/agents/planning', '/agents/focus'].includes(path)) {
-        const profile = user(identity(req).id);
+        const profile = (await user((await identity(req)).id));
         rateLimit(req);
         return send(200, await proposeAgent(path, body, profile));
       }
@@ -136,34 +140,34 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
         const salt = randomBytes(16).toString('hex');
         const digest = (await derivePassword(pw, salt)).toString('hex');
         const id = randomUUID();
-        db.exec('BEGIN');
+        (await db.exec('BEGIN'));
         try {
-          db.prepare('INSERT INTO users (id,name,email,email_verified_at,password_hash,salt,timezone,language,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,n,e,null,digest,salt,timezone,language,now(),now());
-          db.prepare('INSERT INTO preferences (user_id) VALUES (?)').run(id);
-          db.exec('COMMIT');
-        } catch (error) { db.exec('ROLLBACK'); if (error.code?.startsWith('ERR_SQLITE') && db.prepare('SELECT id FROM users WHERE email=?').get(e)) throw new ApiError(409, 'email_taken', 'This email is already registered.', { email: 'Try signing in instead.' }); throw error; }
-        return send(201, startSession(id, req));
+          (await db.prepare('INSERT INTO users (id,name,email,email_verified_at,password_hash,salt,timezone,language,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,n,e,null,digest,salt,timezone,language,now(),now()));
+          (await db.prepare('INSERT INTO preferences (user_id) VALUES (?)').run(id));
+          (await db.exec('COMMIT'));
+        } catch (error) { (await db.exec('ROLLBACK')); if ((error.code?.startsWith('ERR_SQLITE') || error.code === '23505') && (await db.prepare('SELECT id FROM users WHERE email=?').get(e))) throw new ApiError(409, 'email_taken', 'This email is already registered.', { email: 'Try signing in instead.' }); throw error; }
+        return send(201, (await startSession(id, req)));
       }
       if (path === '/auth/login' && req.method === 'POST') {
         allowed(body, ['email','password']);
         const e = email(body.email);
         if (typeof body.password !== 'string' || body.password.length > 128) fail('Enter your password.');
-        const u = db.prepare('SELECT * FROM users WHERE email=?').get(e);
+        const u = (await db.prepare('SELECT * FROM users WHERE email=?').get(e));
         const candidate = await derivePassword(body.password, u?.salt ?? '00000000000000000000000000000000');
         if (!u || !timingSafeEqual(candidate, Buffer.from(u.password_hash, 'hex'))) throw new ApiError(401, 'invalid_credentials', 'Email or password is incorrect.');
-        return send(200, startSession(u.id, req));
+        return send(200, (await startSession(u.id, req)));
       }
       if (['/auth/password-reset','/auth/password-reset/confirm'].includes(path) && req.method === 'POST') throw new ApiError(503, 'email_unavailable', 'Password recovery is not available yet. Email delivery has not been configured.');
       if (path === '/auth/logout' && req.method === 'POST') {
         const token = req.headers.authorization?.replace(/^Bearer /, '');
-        if (token) db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash(token));
+        if (token) (await db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hash(token)));
         return send(200, { success: true });
       }
       if (!path.startsWith('/users/me')) throw new ApiError(404, 'not_found', 'Route not found.');
-      const auth = identity(req);
+      const auth = (await identity(req));
       if (path === '/users/me/reauthenticate' && req.method === 'POST') rateLimit(req);
       if (path === '/users/me/sync' && req.method === 'GET') {
-        const rows = db.prepare('SELECT collection,revision,snapshot FROM personal_sync WHERE user_id=?').all(auth.id);
+        const rows = (await db.prepare('SELECT collection,revision,snapshot FROM personal_sync WHERE user_id=?').all(auth.id));
         return send(200, { collections: Object.fromEntries(rows.map(
           ({ collection, revision, snapshot }) => [collection, { revision, snapshot }],
         )) });
@@ -185,38 +189,41 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
           ([date, mood]) => !/^\d{4}-\d{2}-\d{2}$/.test(date) || typeof mood !== 'string' || mood.length > 100,
         )) fail('Invalid check-in collection.');
 
-        db.exec('BEGIN IMMEDIATE');
+        (await db.exec('BEGIN IMMEDIATE'));
         let result;
         try {
-          const current = db.prepare('SELECT revision,snapshot FROM personal_sync WHERE user_id=? AND collection=?')
-            .get(auth.id, syncCollection) ?? { revision: 0, snapshot: null };
+          const current = (await db.prepare('SELECT revision,snapshot FROM personal_sync WHERE user_id=? AND collection=?')
+            .get(auth.id, syncCollection)) ?? { revision: 0, snapshot: null };
           if (current.snapshot === body.snapshot) {
             result = { applied: true, ...current };
           } else if (current.revision !== body.revision) {
             result = { applied: false, ...current };
           } else {
             result = { applied: true, revision: current.revision + 1, snapshot: body.snapshot };
-            db.prepare('INSERT INTO personal_sync(user_id,collection,revision,snapshot) VALUES (?,?,?,?) ' +
+            (await db.prepare('INSERT INTO personal_sync(user_id,collection,revision,snapshot) VALUES (?,?,?,?) ' +
               'ON CONFLICT(user_id,collection) DO UPDATE SET revision=excluded.revision,snapshot=excluded.snapshot')
-              .run(auth.id, syncCollection, result.revision, result.snapshot);
+              .run(auth.id, syncCollection, result.revision, result.snapshot));
           }
-          db.exec('COMMIT');
-        } catch (error) { db.exec('ROLLBACK'); throw error; }
+          (await db.exec('COMMIT'));
+        } catch (error) { (await db.exec('ROLLBACK')); throw error; }
         return send(200, result);
       }
       const controlled = await controls.handle({ req, path, url, body, auth });
       if (controlled) return send(controlled.status, controlled.data);
-      if (path === '/users/me' && req.method === 'GET') return send(200, user(auth.id));
+      if (path === '/users/me' && req.method === 'GET') return send(200, (await user(auth.id)));
       if (path === '/users/me' && req.method === 'PATCH') {
         allowed(body, ['name']);
-        db.prepare('UPDATE users SET name=?,updated_at=? WHERE id=?').run(name(body.name), now(), auth.id);
-        controls.notice(auth.id, 'profile_updated');
-        return send(200, user(auth.id));
+        (await db.prepare('UPDATE users SET name=?,updated_at=? WHERE id=?').run(name(body.name), now(), auth.id));
+        (await controls.notice(auth.id, 'profile_updated'));
+        return send(200, (await user(auth.id)));
       }
-      if (path === '/users/me/preferences' && req.method === 'GET') return send(200, { timezone: user(auth.id).timezone, language: user(auth.id).language, ...user(auth.id).preferences });
+      if (path === '/users/me/preferences' && req.method === 'GET') return send(200, { timezone: (await user(auth.id)).timezone, language: (await user(auth.id)).language, ...(await user(auth.id)).preferences });
       if (path === '/users/me/preferences' && req.method === 'PATCH') {
         allowed(body, ['timezone','language','theme','cloud_ai','expected']);
-        const u = user(auth.id);
+        (await db.exec('BEGIN'));
+        try {
+        if (accountDb) await accountDb.lockAccount(auth.id);
+        const u = (await user(auth.id));
         if ('expected' in body) {
           if (!body.expected || Array.isArray(body.expected) || typeof body.expected !== 'object') fail('Invalid original settings.');
           allowed(body.expected, ['timezone','language','theme']);
@@ -234,31 +241,39 @@ export function createApi({ database = resolve('backend/data/planify.sqlite'), s
         if (!['system','light','dark'].includes(theme)) fail('Unsupported theme.');
         if ('cloud_ai' in body && typeof body.cloud_ai !== 'boolean') fail('Cloud AI must be a boolean.');
         const consent = body.cloud_ai ?? u.preferences.cloud_ai;
-        db.exec('BEGIN');
-        try {
-          db.prepare('UPDATE users SET timezone=?,language=?,updated_at=? WHERE id=?').run(timezone,language,now(),auth.id);
-          db.prepare('UPDATE preferences SET theme=?,cloud_ai=?,consent_version=?,consent_updated_at=? WHERE user_id=?').run(theme,consent ? 1 : 0,'cloud-context-v1', 'cloud_ai' in body ? now() : u.preferences.consent_updated_at,auth.id);
-          if ('timezone' in body) db.prepare('UPDATE users SET timezone_reviewed=1 WHERE id=?').run(auth.id);
-          controls.notice(auth.id, 'cloud_ai' in body ? 'privacy_updated' : 'preferences_updated');
-          db.exec('COMMIT');
-        } catch (error) { db.exec('ROLLBACK'); throw error; }
-        return send(200, user(auth.id));
+          (await db.prepare('UPDATE users SET timezone=?,language=?,updated_at=? WHERE id=?').run(timezone,language,now(),auth.id));
+          (await db.prepare('UPDATE preferences SET theme=?,cloud_ai=?,consent_version=?,consent_updated_at=? WHERE user_id=?').run(theme,consent ? 1 : 0,'cloud-context-v1', 'cloud_ai' in body ? now() : u.preferences.consent_updated_at,auth.id));
+          if ('timezone' in body) (await db.prepare('UPDATE users SET timezone_reviewed=1 WHERE id=?').run(auth.id));
+          (await controls.notice(auth.id, 'cloud_ai' in body ? 'privacy_updated' : 'preferences_updated'));
+          (await db.exec('COMMIT'));
+        } catch (error) { (await db.exec('ROLLBACK')); throw error; }
+        return send(200, (await user(auth.id)));
       }
       if (path === '/users/me/analytics' && req.method === 'GET') {
         const from = url.searchParams.get('from'), to = url.searchParams.get('to');
         const start = Date.parse(from), end = Date.parse(to);
         if (!from?.endsWith('Z') || !to?.endsWith('Z') || !Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 366*86400000) fail('Choose a valid range up to one year.');
-        return send(200, await privateAnalytics({ source: activitySource, userId: auth.id, from, to, timezone: user(auth.id).timezone }));
+        return send(200, await privateAnalytics({ source: activitySource, userId: auth.id, from, to, timezone: (await user(auth.id)).timezone }));
       }
       if ((path === '/users/me/export' && req.method === 'POST') || (path === '/users/me' && req.method === 'DELETE')) throw new ApiError(503, 'policy_pending', 'Account export and deletion are awaiting the product retention and shared ownership policy. No data has been changed.');
       throw new ApiError(404, 'not_found', 'Route not found.');
     } catch (error) {
       if (!res.headersSent) send(error.status ?? 500, { error: { code: error.code ?? 'internal', message: error.status ? error.message : 'Something went wrong. Please try again.', fields: error.fields ?? {} } });
     }
+  };
+  let queue = Promise.resolve();
+  const server = http.createServer((req, res) => {
+    const run = () => handler(req, res);
+    (accountDb ? accountDb.withConnection(run) : (queue = queue.then(run, run))).catch(() => {
+      if (!res.headersSent) res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { code: 'database_unavailable', message: 'Storage is temporarily unavailable. Your local work is preserved. Retry shortly.' } }));
+    });
   });
+  server.ready = ready;
+  ready.catch(() => {});
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
-  server.on('close', () => { clearInterval(cleanup); db.close(); });
+  server.on('close', () => { void db.close(); });
   return server;
 }
 

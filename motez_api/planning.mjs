@@ -1,3 +1,4 @@
+import { aiRequest } from '../backend/src/ai_provider.mjs';
 const validText = (value, length) =>
   typeof value === 'string' && value.trim().length > 0 && value.length <= length;
 const clock = (value) => Number.isInteger(value) && value >= 0 && value <= 1440;
@@ -46,15 +47,15 @@ export async function proposePlanning(body, env = process.env, request = fetch) 
     name, description: 'Read the planning context or computed differences',
     parameters: { type: 'object', properties: {}, additionalProperties: false },
   } }];
-  const url = (env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '') + '/chat/completions';
+  const url = (env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '') + '/chat/completions';
   async function ask(tool_choice) {
-    const response = await request(url, {
+    const response = await aiRequest(url, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + env.AI_API_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: env.AI_MODEL, messages, tools, tool_choice,
         response_format: { type: 'json_object' } }),
-      signal: AbortSignal.timeout(15000),
-    });
+      signal: AbortSignal.timeout(60000),
+    }, request, env);
     if (!response.ok) throw fail('Planning provider request failed.', 502);
     return (await response.json()).choices?.[0]?.message;
   }

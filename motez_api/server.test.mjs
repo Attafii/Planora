@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { propose } from './server.mjs';
 
-const env = { AI_API_KEY: 'test-key', AI_MODEL: 'test-model' };
+const env = { AI_API_KEY: 'test-key', AI_MODEL: 'test-model:free' };
 function provider(tool, result) {
   let read = false;
   return async (_url, options) => {

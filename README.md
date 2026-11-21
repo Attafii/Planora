@@ -114,13 +114,16 @@ feature routes; this branch does not invent those routes or write workflows.
 
 ## API deployment
 
-Configure PORT, HOST, DATABASE_PATH and comma-separated ALLOWED_ORIGINS. Defaults
+Configure PORT, HOST, DATABASE_URL and comma-separated ALLOWED_ORIGINS.
+The integrated server uses Neon for accounts, sessions, personal sync and workspace
+data when DATABASE_URL is set. Production requires this URL. See
+[Neon and OpenRouter setup](docs/NEON_OPENROUTER.md) for migrations and free AI limits. Defaults
 are local-only. Terminate TLS at a trusted reverse proxy; preserve the correct
 client address for per-address rate limiting (do not trust arbitrary forwarded
 headers). The built-in in-memory rate limiter is for a single API process; a
 multi-instance deployment needs shared limits. Sessions last seven days, support
 multiple devices, and are individually revocable. Passwords use salted scrypt;
-only SHA-256 session-token hashes are stored in SQLite. Never log request bodies
+only SHA-256 session-token hashes are stored. SQLite remains a local development fallback when DATABASE_URL is absent. Never log request bodies
 or Authorization headers. Plan production backups, database access controls and
 recovery before deployment. The local preview is not a production hosting server.
 

@@ -10,7 +10,9 @@
     "start": "node --env-file-if-exists=.env planify.mjs",
     "dev": "node --watch --env-file-if-exists=.env planify.mjs",
     "test": "node --test --test-concurrency=1 test/*.test.mjs *.test.mjs",
-    "check": "node scripts/check.mjs && node --check planify.mjs && node --check server.mjs"
+    "check": "node scripts/check.mjs && node --check planify.mjs && node --check server.mjs",
+    "db:provision": "node --env-file-if-exists=.env scripts/provision.mjs",
+    "db:migrate-accounts": "node --env-file-if-exists=.env scripts/migrate-accounts.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.9",

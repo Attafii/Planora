@@ -119,3 +119,6 @@ CREATE INDEX IF NOT EXISTS comments_project ON comments(project_id,created_at);
 CREATE INDEX IF NOT EXISTS activity_project ON activity(project_id,created_at);
 CREATE INDEX IF NOT EXISTS conversations_owner ON conversations(owner_id,updated_at);
 CREATE INDEX IF NOT EXISTS proposals_owner ON proposals(owner_id,created_at);
+
+-- Shared request budget; counts provider calls, not user messages.
+CREATE TABLE IF NOT EXISTS ai_daily_usage (day DATE PRIMARY KEY, requests INTEGER NOT NULL CHECK(requests >= 0));

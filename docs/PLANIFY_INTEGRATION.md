@@ -17,3 +17,10 @@ On registration, Planify uses the device's IANA timezone when available. If the 
 For an Android debug smoke test, run the local API, connect an emulator, run `adb reverse tcp:4100 tcp:4100`, and launch with `flutter run -d <device-id> --dart-define=API_BASE_URL=http://127.0.0.1:4100`. Exercise onboarding, task capture, calendar proposal and approval, linked focus, interruption recovery and sync after reconnect. Check the dock with large system text and reduced motion. Use `flutter build apk --release` for the Android build check. The repository's release build uses its development signing configuration. Building and testing on iOS requires macOS, Xcode and a connected device or simulator.
 
 Offline sessions still use the account's existing personal-data queue. Cloud AI requires consent and a configured provider. External calendar connections remain unavailable until a provider is configured.
+
+## Shared Neon and free OpenRouter configuration
+
+Accounts, sessions and personal sync now join goals/projects on Neon when
+DATABASE_URL is configured. All AI provider adapters enforce free OpenRouter
+models and share a persistent daily request budget. See
+[Neon and OpenRouter](NEON_OPENROUTER.md) for migration results and verification.

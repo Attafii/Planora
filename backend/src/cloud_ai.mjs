@@ -1,3 +1,4 @@
+import { aiRequest } from './ai_provider.mjs';
 import { z } from 'zod';
 import { ApiError } from './core.mjs';
 
@@ -8,10 +9,10 @@ const answerSchema = z.object({
 
 // Free providers can queue requests. Keep this deadline below the client's 75s.
 export async function cloudAnswer(messages, { timeoutMs = 60000 } = {}) {
-  const base = (process.env.AI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const base = (process.env.AI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
   const openrouter = new URL(base).hostname === 'openrouter.ai';
   try {
-    const response = await fetch(`${base}/chat/completions`, {
+    const response = await aiRequest(`${base}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.AI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -6,14 +6,30 @@ export async function openDatabase({ url = process.env.DATABASE_URL, path = proc
   const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
   if (url) {
     const pool = new pg.Pool({ connectionString: url });
-    await pool.query(schema);
+    const setup = await pool.connect();
+    try {
+      await setup.query('BEGIN');
+      await setup.query('SET LOCAL search_path TO public');
+      await setup.query(schema);
+      await setup.query('COMMIT');
+    } catch (e) { await setup.query('ROLLBACK'); throw e; } finally { setup.release(); }
     return {
       mode: 'PostgreSQL',
-      query: (sql, args) => pool.query(sql, args),
+      query: async (sql, args) => {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query('SET LOCAL search_path TO public');
+          const result = await client.query(sql, args);
+          await client.query('COMMIT');
+          return result;
+        } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+      },
       transaction: async (fn) => {
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
+          await client.query('SET LOCAL search_path TO public');
           const result = await fn(client);
           await client.query('COMMIT');
           return result;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { proposePlanning } from './planning.mjs';
 
-const env = { AI_API_KEY: 'example', AI_MODEL: 'example' };
+const env = { AI_API_KEY: 'example', AI_MODEL: 'example:free' };
 function provider(name, result) {
   return async (_url, { body }) => {
     const request = JSON.parse(body);
