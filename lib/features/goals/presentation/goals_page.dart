@@ -56,6 +56,7 @@ class _GoalsPageState extends State<GoalsPage> {
                 dropdownMenuEntries: const [
                   DropdownMenuEntry(value: '', label: 'All goals'),
                   DropdownMenuEntry(value: 'active', label: 'Active'),
+                  DropdownMenuEntry(value: 'paused', label: 'Paused'),
                   DropdownMenuEntry(value: 'completed', label: 'Completed'),
                   DropdownMenuEntry(value: 'archived', label: 'Archived'),
                 ],
@@ -172,7 +173,14 @@ class _GoalsPageState extends State<GoalsPage> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      ProgressMeter(g.progress),
+                      if (g.progress case final progress?)
+                        ProgressMeter(progress)
+                      else
+                        Text(
+                          g.progressSource == 'unavailable'
+                              ? 'Progress unavailable until tasks sync.'
+                              : 'No linked activity to measure yet.',
+                        ),
                     ],
                   ),
                 ),

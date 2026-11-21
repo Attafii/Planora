@@ -1,19 +1,24 @@
+import { counts } from './work_progress.mjs';
 import { z } from 'zod';
 import { one, rows } from './database.mjs';
 import { id, now, title, uuid, secret, hash, parse, requireThat, projectRole, taskAccess, activity, pagination, managers } from './core.mjs';
-const projectSchema=z.object({title,description:z.string().trim().max(4000).default('')}).strict();
+const projectSchema=z.object({title,description:z.string().trim().max(4000).default(''),request_id:uuid.optional(),expected_updated_at:z.string().optional()}).strict();
 const inviteSchema=z.object({email:z.string().trim().email().max(254).transform(s=>s.toLowerCase()),role:z.enum(['admin','collaborator','viewer']).default('collaborator')}).strict();
 export async function projectDetail(db,key,user){
- const role=await projectRole(db,key,user),p=await one(db,'SELECT * FROM projects WHERE id=$1',[key]);
+ const role=await projectRole(db,key,user,undefined,true),p=await one(db,'SELECT * FROM projects WHERE id=$1',[key]);
  const members=await rows(db,'SELECT u.id,u.name,u.email,pm.role FROM project_members pm JOIN users u ON u.id=pm.user_id WHERE pm.project_id=$1 ORDER BY u.name',[key]);
  const tasks=await rows(db,'SELECT t.*,a.user_id AS assignee_id,u.name AS assignee_name FROM tasks t LEFT JOIN task_assignments a ON a.task_id=t.id LEFT JOIN users u ON u.id=a.user_id WHERE t.project_id=$1 ORDER BY t.updated_at DESC',[key]);
  const goals=await rows(db,'SELECT id,title,status FROM goals WHERE project_id=$1 ORDER BY updated_at DESC',[key]);
- const active=tasks.filter(t=>!['cancelled','archived'].includes(t.status)),completed=active.filter(t=>t.status==='completed').length;
- return {...p,role,members,tasks,goals,progress:active.length?Math.round(completed/active.length*100):0};
+ const active=tasks.filter(t=>!['cancelled','archived'].includes(t.status));
+ const {total,completed}=counts(active,t=>t.status==='completed');
+ return {...p,role,members,tasks,goals,item_count:total,completed_count:completed,
+  progress:total?Math.round(completed/total*100):null,progress_checked_at:now()};
 }
 export async function assignTask(db,user,taskId,memberId){
- const task=await taskAccess(db,taskId,user);requireThat(task.project_id,'Only shared project tasks can be assigned.',422);
- await projectRole(db,task.project_id,user,managers);
+ const {project_id:projectId}=await taskAccess(db,taskId,user);requireThat(projectId,'Only shared project tasks can be assigned.',422);
+ await projectRole(db,projectId,user,managers);
+ const task=await taskAccess(db,taskId,user);
+ if(task.assignee_id===memberId)return task;
  if(memberId){await projectRole(db,task.project_id,{id:memberId},['owner','admin','collaborator']);await db.query('INSERT INTO task_assignments(task_id,user_id,assigned_by,assigned_at) VALUES($1,$2,$3,$4) ON CONFLICT(task_id) DO UPDATE SET user_id=$2,assigned_by=$3,assigned_at=$4',[taskId,memberId,user.id,now()]);}
  else await db.query('DELETE FROM task_assignments WHERE task_id=$1',[taskId]);
  await activity(db,task.project_id,user,'task_assigned',`Updated assignment for ${task.title}`);return taskAccess(db,taskId,user);
@@ -30,9 +35,34 @@ export function registerCollaboration(route){
   const {limit,offset}=pagination(req),order=req.query.sort==='title'?'p.title':'p.updated_at DESC';
   const items=await rows(db,`SELECT p.*,m.role,(SELECT COUNT(*) FROM project_members pm WHERE pm.project_id=p.id) AS member_count FROM projects p JOIN project_members m ON m.project_id=p.id WHERE m.user_id=$1 AND ($2='' OR p.title ILIKE '%'||$2||'%') ORDER BY ${order},p.id LIMIT $3 OFFSET $4`,[user.id,String(req.query.search||'').slice(0,160),limit+1,offset]);return {items:items.slice(0,limit),has_more:items.length>limit,offset};
  });
- route('post','/projects',async(req,db,user)=>{const d=parse(projectSchema,req.body),key=id(),time=now();await db.query('INSERT INTO projects(id,owner_id,title,description,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$5)',[key,user.id,d.title,d.description,time]);await db.query("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')",[key,user.id]);await activity(db,key,user,'project_created',`Created ${d.title}`);return projectDetail(db,key,user);},{status:201});
+ route('post','/projects',async(req,db,user)=>{const d=parse(projectSchema,req.body),key=d.request_id??id(),time=now();
+  if(d.request_id){
+   const existing=await one(db,'SELECT owner_id,title,description FROM projects WHERE id=$1',[key]);
+   if(existing){
+    requireThat(existing.owner_id===user.id,'The project could not be saved with this request.',409);
+    requireThat(existing.title===d.title && existing.description===d.description,
+      'A previous save already created this project. Open it to apply your changed draft.',409,'changed_retry');
+    return projectDetail(db,key,user);
+   }
+  }
+  await db.query('INSERT INTO projects(id,owner_id,title,description,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$5)',[key,user.id,d.title,d.description,time]);await db.query("INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,'owner')",[key,user.id]);await activity(db,key,user,'project_created',`Created ${d.title}`);return projectDetail(db,key,user);},{status:201});
+ route('get','/projects/planning-tasks',async(req,db,user)=>({
+  items:await rows(db,`
+   SELECT t.id,t.estimated_minutes,t.deadline,t.status
+   FROM tasks t JOIN project_members m ON m.project_id=t.project_id AND m.user_id=$1
+   LEFT JOIN task_assignments a ON a.task_id=t.id
+   WHERE t.status IN ('todo','in_progress','completed') AND m.role<>'viewer'
+    AND (a.user_id=$1 OR (a.user_id IS NULL AND t.owner_id=$1))
+   ORDER BY t.id`,[user.id]),
+ }));
  route('get','/projects/:id',(req,db,user)=>projectDetail(db,req.params.id,user));
- route('patch','/projects/:id',async(req,db,user)=>{await projectRole(db,req.params.id,user,managers);const d=parse(projectSchema,req.body);await db.query('UPDATE projects SET title=$2,description=$3,updated_at=$4 WHERE id=$1',[req.params.id,d.title,d.description,now()]);await activity(db,req.params.id,user,'project_updated',`Updated ${d.title}`);return projectDetail(db,req.params.id,user);});
+ route('patch','/projects/:id',async(req,db,user)=>{await projectRole(db,req.params.id,user,managers);const d=parse(projectSchema,req.body);
+  const p=await one(db,'SELECT * FROM projects WHERE id=$1',[req.params.id]);
+  if(d.expected_updated_at&&d.expected_updated_at!==p.updated_at){
+   requireThat(p.title===d.title&&p.description===d.description,'This project changed elsewhere. Reopen it to review the latest version.',409,'stale_project');
+   return projectDetail(db,p.id,user);
+  }
+  await db.query('UPDATE projects SET title=$2,description=$3,updated_at=$4 WHERE id=$1',[req.params.id,d.title,d.description,now()]);await activity(db,req.params.id,user,'project_updated',`Updated ${d.title}`);return projectDetail(db,req.params.id,user);});
  route('delete','/projects/:id',async(req,db,user)=>{await projectRole(db,req.params.id,user,['owner']);await db.query('DELETE FROM projects WHERE id=$1',[req.params.id]);return {deleted:true};});
  route('get','/projects/:id/members',async(req,db,user)=>(await projectDetail(db,req.params.id,user)).members);
  route('post','/projects/:id/transfer-ownership',async(req,db,user)=>{
@@ -54,7 +84,7 @@ export function registerCollaboration(route){
   const role=await projectRole(db,req.params.id,user,managers),target=await projectRole(db,req.params.id,{id:req.params.memberId});requireThat(target!=='owner','The project owner cannot be removed.',409);requireThat(role==='owner'||target!=='admin','Only the owner can remove an admin.',403);
   await db.query('DELETE FROM task_assignments WHERE user_id=$1 AND task_id IN (SELECT id FROM tasks WHERE project_id=$2)',[req.params.memberId,req.params.id]);await db.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[req.params.id,req.params.memberId]);await activity(db,req.params.id,user,'member_removed','Removed a member');return {deleted:true};
  });
- route('post','/projects/:id/leave',async(req,db,user)=>{const role=await projectRole(db,req.params.id,user);requireThat(role!=='owner','The owner must keep the project or delete it.',409);await db.query('DELETE FROM task_assignments WHERE user_id=$1 AND task_id IN (SELECT id FROM tasks WHERE project_id=$2)',[user.id,req.params.id]);await db.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[req.params.id,user.id]);await activity(db,req.params.id,user,'member_left','Left the project');return {left:true};});
+ route('post','/projects/:id/leave',async(req,db,user)=>{const role=await projectRole(db,req.params.id,user,undefined,true);requireThat(role!=='owner','The owner must keep the project or delete it.',409);await db.query('DELETE FROM task_assignments WHERE user_id=$1 AND task_id IN (SELECT id FROM tasks WHERE project_id=$2)',[user.id,req.params.id]);await db.query('DELETE FROM project_members WHERE project_id=$1 AND user_id=$2',[req.params.id,user.id]);await activity(db,req.params.id,user,'member_left','Left the project');return {left:true};});
  route('get','/projects/:id/invitations',async(req,db,user)=>{await projectRole(db,req.params.id,user,managers);return rows(db,"SELECT id,email,role,CASE WHEN status='pending' AND expires_at<$2 THEN 'expired' ELSE status END AS status,expires_at,created_at FROM invitations WHERE project_id=$1 ORDER BY created_at DESC",[req.params.id,now()]);});
  route('post','/projects/:id/invitations',async(req,db,user)=>{
   const role=await projectRole(db,req.params.id,user,managers),d=parse(inviteSchema,req.body);requireThat(role==='owner'||d.role!=='admin','Only the owner can invite an admin.',403);
@@ -65,7 +95,17 @@ export function registerCollaboration(route){
  },{status:201});
  route('post','/projects/:id/invitations/:invitationId/revoke',async(req,db,user)=>{await projectRole(db,req.params.id,user,managers);const inv=await one(db,'SELECT * FROM invitations WHERE id=$1 AND project_id=$2',[req.params.invitationId,req.params.id]);requireThat(inv,'Invitation not found.',404);requireThat(inv.status==='pending','This invitation has already been handled.',409);await db.query("UPDATE invitations SET status='revoked' WHERE id=$1",[inv.id]);await activity(db,req.params.id,user,'invitation_revoked',`Revoked invitation for ${inv.email}`);return {revoked:true};});
  route('get','/invitations/:token',async(req,db,user)=>{const i=await invitation(db,req.params.token,user);const project=await one(db,'SELECT title FROM projects WHERE id=$1',[i.project_id]);const sender=await one(db,'SELECT name FROM users WHERE id=$1',[i.invited_by]);return {id:i.id,title:project.title,role:i.role,email:i.email,sender:sender.name,status:i.status==='pending'&&i.expires_at<now()?'expired':i.status,expires_at:i.expires_at};});
- route('post','/invitations/:token/respond',async(req,db,user)=>{const i=await invitation(db,req.params.token,user,true),d=parse(z.object({accept:z.boolean()}).strict(),req.body);if(d.accept){await db.query('INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[i.project_id,user.id,i.role]);await activity(db,i.project_id,user,'member_joined','Joined the project');}await db.query('UPDATE invitations SET status=$2 WHERE id=$1',[i.id,d.accept?'accepted':'rejected']);return {project_id:i.project_id,status:d.accept?'accepted':'rejected'};});
+ route('post','/invitations/:token/respond',async(req,db,user)=>{const before=await invitation(db,req.params.token,user),d=parse(z.object({accept:z.boolean()}).strict(),req.body);
+  await db.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE',[before.project_id]);
+  const i=await invitation(db,req.params.token,user);
+  const status=d.accept?'accepted':'rejected';
+  if(i.status===status){
+    if(d.accept)await projectRole(db,i.project_id,user);
+    return {project_id:i.project_id,status};
+  }
+  requireThat(i.status==='pending','This invitation has already been handled.',409);
+  requireThat(i.expires_at>now(),'This invitation expired. Ask the project owner for a new link.',410);
+  if(d.accept){await db.query('INSERT INTO project_members(project_id,user_id,role) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[i.project_id,user.id,i.role]);await activity(db,i.project_id,user,'member_joined','Joined the project');}await db.query('UPDATE invitations SET status=$2 WHERE id=$1',[i.id,d.accept?'accepted':'rejected']);return {project_id:i.project_id,status:d.accept?'accepted':'rejected'};});
  route('post','/projects/:id/assignments',(req,db,user)=>{const d=parse(z.object({task_id:uuid,user_id:uuid.nullable()}).strict(),req.body);return (async()=>{await projectRole(db,req.params.id,user,managers);const t=await taskAccess(db,d.task_id,user);requireThat(t.project_id===req.params.id,'Task belongs to another project.',422);return assignTask(db,user,d.task_id,d.user_id);})();});
  route('get','/projects/:id/comments',async(req,db,user)=>{await projectRole(db,req.params.id,user);const {limit,offset}=pagination(req);const list=await rows(db,'SELECT c.*,u.name AS author_name FROM comments c JOIN users u ON u.id=c.author_id WHERE c.project_id=$1 ORDER BY c.created_at DESC,c.id LIMIT $2 OFFSET $3',[req.params.id,limit+1,offset]);return {items:list.slice(0,limit),has_more:list.length>limit,offset};});
  route('post','/projects/:id/comments',(req,db,user)=>addComment(db,user,req.params.id,req.body),{status:201});
@@ -76,8 +116,7 @@ export function registerCollaboration(route){
  });
  route('get','/projects/:id/activity',async(req,db,user)=>{await projectRole(db,req.params.id,user);const {limit,offset}=pagination(req);const list=await rows(db,'SELECT a.*,u.name AS actor_name FROM activity a JOIN users u ON u.id=a.actor_id WHERE a.project_id=$1 ORDER BY a.created_at DESC,a.id LIMIT $2 OFFSET $3',[req.params.id,limit+1,offset]);return {items:list.slice(0,limit),has_more:list.length>limit,offset};});
 }
-async function invitation(db,token,user,pending=false){
- requireThat(token.length<128,'Invalid invitation.',422);const i=await one(db,'SELECT * FROM invitations WHERE token_hash=$1 FOR UPDATE',[hash(token)]);requireThat(i,'Invitation not found.',404);requireThat(i.email===user.email,'Sign in with the email address this invitation was sent to.',403,'wrong_account');
- if(pending){requireThat(i.status==='pending','This invitation has already been handled.',409);requireThat(i.expires_at>now(),'This invitation expired. Ask the project owner for a new link.',410);}
+async function invitation(db,token,user){
+ requireThat(token.length<128,'Invalid invitation.',422);const i=await one(db,'SELECT * FROM invitations WHERE token_hash=$1',[hash(token)]);requireThat(i,'Invitation not found.',404);requireThat(i.email===user.email,'Sign in with the email address this invitation was sent to.',403,'wrong_account');
  return i;
 }

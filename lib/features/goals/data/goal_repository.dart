@@ -57,6 +57,16 @@ class GoalRepository {
     ),
     TaskItem.fromJson,
   );
+  Future<Paged<TaskItem>> personalTasks({
+    String search = '',
+    int offset = 0,
+  }) async => Paged.fromJson(
+    await api.get(
+      '/goals/personal-tasks',
+      query: {'search': search, 'offset': '$offset'},
+    ),
+    TaskItem.fromJson,
+  );
   Future<TaskItem> createTask(JsonMap data) async =>
       TaskItem.fromJson(await api.post('/tasks', data));
   Future<TaskItem> task(String id) async =>
@@ -65,10 +75,13 @@ class GoalRepository {
     await api.patch('/tasks/$id', {'status': status});
   }
 
-  Future<void> link(String id, String taskId) async {
-    await api.post('/goals/$id/tasks', {'task_id': taskId});
+  Future<void> link(String id, String taskId, {bool personal = false}) async {
+    final collection = personal ? 'personal-tasks' : 'tasks';
+    await api.post('/goals/$id/$collection', {'task_id': taskId});
   }
 
-  Future<void> unlink(String id, String taskId) =>
-      api.delete('/goals/$id/tasks/$taskId');
+  Future<void> unlink(String id, String taskId, {bool personal = false}) {
+    final collection = personal ? 'personal-tasks' : 'tasks';
+    return api.delete('/goals/$id/$collection/$taskId');
+  }
 }

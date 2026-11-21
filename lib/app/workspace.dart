@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 
+import 'app_services.dart' show AppServices;
 import 'today_page.dart';
+import 'work_activity.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -25,9 +28,10 @@ import '../features/tasks/task_store.dart';
 import '../features/tasks/tasks_page.dart';
 
 class Workspace extends StatefulWidget {
-  const Workspace({super.key, required this.session});
+  const Workspace({super.key, required this.session, this.services});
 
   final AppSession session;
+  final AppServices? services;
 
   @override
   State<Workspace> createState() => _WorkspaceState();
@@ -50,7 +54,117 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   Widget get focusSyncStatus =>
       ListenableBuilder(listenable: sync, builder: (_, _) => syncStatus());
 
-  void startFocus(String date, PlanBlock block) {
+  Future<void>? _sharedRefresh;
+  Timer? _sharedTimer;
+  late final activity = WorkActivity(
+    tasks: tasks,
+    planning: planning,
+    focus: focus,
+    openCalendar: openWorkCalendar,
+    openTask: openPersonalTask,
+    syncPersonal: () async {
+      await tasks.settled;
+      await sync.sync();
+      if (sync.pending &&
+          !sync.offline &&
+          sync.error == null &&
+          !sync.updates.containsKey('tasks')) {
+        await sync.sync();
+      }
+      if (sync.offline ||
+          sync.error != null ||
+          sync.updates.containsKey('tasks')) {
+        throw StateError(
+          'Resolve task sync from Today before refreshing goal activity.',
+        );
+      }
+    },
+  );
+
+  Future<void> refreshSharedWork() => _sharedRefresh ??= _loadSharedWork()
+      .whenComplete(() => _sharedRefresh = null);
+
+  Future<void> _loadSharedWork() async {
+    if (!mounted || widget.session.account?.id != accountId) {
+      throw const ApiFailure(AppSession.ended, status: 401);
+    }
+    try {
+      final data = await widget.session.request(
+        'GET',
+        '/projects/planning-tasks',
+      );
+      if (!mounted || widget.session.account?.id != accountId) return;
+      tasks.setSharedTasks([
+        for (final row in (data['items'] as List).cast<Map<String, dynamic>>())
+          Task(
+            id: sharedTaskKey(row['id'] as String),
+            title: sharedTaskLabel(row['id'] as String),
+            minutes: row['estimated_minutes'] as int,
+            due: row['deadline'] as String?,
+            done: row['status'] == 'completed',
+          ),
+      ]);
+    } catch (_) {
+      if (mounted) tasks.setSharedTasks([]);
+      rethrow;
+    }
+  }
+
+  Future<void> completeSharedWork(String id) async {
+    if (!mounted || widget.session.account?.id != accountId) {
+      throw const ApiFailure(AppSession.ended, status: 401);
+    }
+    await widget.session.request('PATCH', '/tasks/$id', {
+      'status': 'completed',
+      'from_plan': true,
+    });
+    refreshSharedWork().ignore();
+  }
+
+  Future<void> openPersonalTask(String id) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => TasksPage(
+          store: tasks,
+          focus: focus,
+          syncStatus: focusSyncStatus,
+          initialTaskId: id,
+          agent: TaskAgent(session: widget.session, accountId: accountId),
+        ),
+      ),
+    );
+  }
+
+  Future<void> openWorkCalendar() async {
+    await refreshSharedWork();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => PlanningPage(
+          store: planning,
+          agent: planningAgent,
+          onStartFocus: startFocus,
+          syncStatus: focusSyncStatus,
+        ),
+      ),
+    );
+  }
+
+  Future<void> startFocus(String date, PlanBlock block) async {
+    if (isSharedTaskKey(block.id)) {
+      try {
+        await refreshSharedWork();
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Reconnect to verify access to this project task.'),
+            ),
+          );
+        }
+        return;
+      }
+    }
     if (!mounted || widget.session.account?.id != accountId) return;
     openFocus(
       context,
@@ -107,12 +221,23 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) sync.sync();
+    if (state == AppLifecycleState.resumed) {
+      sync.sync();
+      if (widget.services != null) refreshSharedWork().ignore();
+    }
   }
 
   Future<void> load() async {
     await sync.open();
     await reloadStores();
+    if (!mounted || widget.services == null) return;
+    tasks.refreshShared = refreshSharedWork;
+    tasks.completeShared = completeSharedWork;
+    widget.services!.workActivity = activity;
+    _sharedTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      refreshSharedWork().ignore();
+    });
+    refreshSharedWork().ignore();
   }
 
   Future<void> reloadStores() async {
@@ -124,6 +249,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _sharedTimer?.cancel();
+    if (widget.services?.workActivity == activity) {
+      widget.services!.workActivity = null;
+    }
     if (widget.session.account?.id != accountId) focus.clearDeviceAlerts();
     sync.dispose();
     planning.dispose();
@@ -482,7 +611,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     ),
   );
 
-  void select(int index) => setState(() => selected = index);
+  void select(int index) {
+    setState(() => selected = index);
+    if (index == 1 && widget.services != null) refreshSharedWork().ignore();
+  }
 }
 
 class _MorePage extends StatelessWidget {

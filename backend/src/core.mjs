@@ -33,7 +33,9 @@ export async function currentUser(req, db) {
   requireThat(user, 'Your session expired. Please sign in again.', 401, 'unauthenticated');
   return user;
 }
-export async function projectRole(db, projectId, user, roles) {
+export async function projectRole(db, projectId, user, roles, lock = Boolean(roles)) {
+  // Membership changes and authorization for project mutations share this lock.
+  if (lock) await db.query('SELECT id FROM projects WHERE id=$1 FOR UPDATE', [projectId]);
   const row = await one(db, 'SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2', [projectId, user.id]);
   requireThat(row, 'This project is not available to your account.', 403, 'forbidden');
   if (roles) requireThat(roles.includes(row.role), 'Your project role does not allow this action.', 403, 'forbidden');
@@ -43,18 +45,28 @@ export async function goalAccess(db, goalId, user, write = false) {
   const goal = await one(db, 'SELECT * FROM goals WHERE id=$1', [goalId]);
   requireThat(goal, 'This goal could not be found.', 404);
   if (goal.project_id) {
-    const role=await projectRole(db,goal.project_id,user);
+    const role=await projectRole(db,goal.project_id,user,undefined,write);
     if(write)requireThat(['owner','admin'].includes(role)||(role==='collaborator'&&goal.owner_id===user.id),'You cannot edit another member’s goal.',403);
   }
   else requireThat(goal.owner_id === user.id, 'This goal is private.', 403, 'forbidden');
+  if(write) {
+    const current = await one(db, 'SELECT * FROM goals WHERE id=$1 FOR UPDATE', [goalId]);
+    requireThat(current, 'This goal could not be found.', 404);
+    return current;
+  }
   return goal;
 }
 export async function taskAccess(db, taskId, user, write = false) {
-  const task = await one(db, 'SELECT t.*,a.user_id AS assignee_id FROM tasks t LEFT JOIN task_assignments a ON a.task_id=t.id WHERE t.id=$1', [taskId]);
+  const query = 'SELECT t.*,a.user_id AS assignee_id FROM tasks t LEFT JOIN task_assignments a ON a.task_id=t.id WHERE t.id=$1';
+  let task = await one(db, query, [taskId]);
   requireThat(task, 'This task could not be found.', 404);
   let canEdit=task.owner_id===user.id;
   if (task.project_id) {
-    const role = await projectRole(db, task.project_id, user);
+    const role = await projectRole(db, task.project_id, user, undefined, write);
+    if (write) {
+      task = await one(db, query, [taskId]);
+      requireThat(task, 'This task could not be found.', 404);
+    }
     canEdit=['owner','admin'].includes(role) || (role==='collaborator' && (task.owner_id===user.id || task.assignee_id===user.id));
     if (write) requireThat(canEdit, 'You can only update tasks assigned to you or created by you.', 403);
   } else requireThat(task.owner_id===user.id, 'This task is private.', 403);

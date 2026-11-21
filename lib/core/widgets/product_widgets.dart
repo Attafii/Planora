@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -220,8 +222,14 @@ class StateMessage extends StatelessWidget {
 }
 
 class AsyncView<T> extends StatefulWidget {
-  const AsyncView({super.key, required this.load, required this.builder});
+  const AsyncView({
+    super.key,
+    required this.load,
+    required this.builder,
+    this.revalidateEvery,
+  });
   final Future<T> Function() load;
+  final Duration? revalidateEvery;
   final Widget Function(BuildContext, T, VoidCallback) builder;
   @override
   State<AsyncView<T>> createState() => AsyncViewState<T>();
@@ -229,17 +237,45 @@ class AsyncView<T> extends StatefulWidget {
 
 class AsyncViewState<T> extends State<AsyncView<T>> {
   late Future<T> _future;
+  Timer? _revalidate;
+  int _request = 0;
+  bool _loading = false;
+  bool _background = false;
   @override
   void initState() {
     super.initState();
-    _future = widget.load();
+    _future = _load();
+    if (widget.revalidateEvery case final interval?) {
+      _revalidate = Timer.periodic(interval, (_) {
+        if (mounted && ModalRoute.of(context)?.isCurrent != false) {
+          _refresh(background: true);
+        }
+      });
+    }
   }
 
-  void refresh() {
-    if (!mounted) return;
+  @override
+  void dispose() {
+    _revalidate?.cancel();
+    super.dispose();
+  }
+
+  Future<T> _load() {
+    final request = ++_request;
+    _loading = true;
+    return widget.load().whenComplete(() {
+      if (request == _request) _loading = false;
+    });
+  }
+
+  void refresh() => _refresh(background: false);
+
+  void _refresh({required bool background}) {
+    if (!mounted || (background && _loading)) return;
     // setState callbacks must be synchronous and must not return the Future.
-    final next = widget.load();
+    final next = _load();
     setState(() {
+      _background = background || widget.revalidateEvery != null;
       _future = next;
     });
   }
@@ -248,7 +284,8 @@ class AsyncViewState<T> extends State<AsyncView<T>> {
   Widget build(BuildContext context) => FutureBuilder<T>(
     future: _future,
     builder: (context, s) {
-      if (s.connectionState != ConnectionState.done) {
+      if (s.connectionState != ConnectionState.done &&
+          !(_background && s.hasData)) {
         return const Center(child: CircularProgressIndicator());
       }
       if (s.hasError) {

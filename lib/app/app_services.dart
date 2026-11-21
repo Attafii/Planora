@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'work_activity.dart';
+
 import '../core/network/api_client.dart';
 import '../core/services/storage_service.dart';
 import '../features/goals/data/goal_repository.dart';
@@ -87,6 +89,7 @@ class AppServices {
     gamification = GamificationRepository(api);
   }
   final ApiClient api;
+  WorkActivity? workActivity;
   late final AppSession session;
   late final GoalRepository goals;
   late final CollaborationRepository collaboration;

@@ -62,6 +62,71 @@ class Fixture {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('project planning and focus reuse the shared task without storing a personal copy', () async {
+    final fixture = Fixture();
+    final task = Task(
+      id: sharedTaskKey('record'),
+      title: sharedTaskLabel('record'),
+    );
+    var completed = false;
+    fixture.tasks.completeShared = (id) async {
+      expect(id, 'record');
+      completed = true;
+      fixture.tasks.setSharedTasks([
+        task.patch({'done': true}),
+      ]);
+    };
+    fixture.tasks.setSharedTasks([task]);
+    expect(fixture.tasks.inbox, isEmpty);
+    final draft = fixture.plan.preview(Fixture.date);
+    await fixture.plan.approve(draft);
+    final block = fixture.plan
+        .calendarEntries(Fixture.date)
+        .singleWhere((block) => block.id == task.id);
+    expect(block.id, task.id);
+    expect(fixture.storage.values['planify.tasks.v1'], isNull);
+    final slot = ScheduledFocus.fromBlock(block, Fixture.date, null);
+    final session = fixture.focus.startScheduled(slot, 25, 'Countdown');
+    fixture.advance(3000);
+    fixture.focus.finish();
+    await fixture.focus.settled;
+    expect(fixture.focus.recordedSecondsFor({task.id}), 3);
+    expect(completed, isFalse);
+    await fixture.focus.completeLinkedTask(session.id);
+    expect(completed, isTrue);
+    fixture.tasks.setSharedTasks([]);
+    expect(
+      fixture.plan
+          .calendarEntries(Fixture.date)
+          .where((block) => block.id == task.id),
+      isEmpty,
+    );
+    expect(fixture.plan.day(Fixture.date).approved.single.id, task.id);
+    expect(
+      () => fixture.focus.startScheduled(slot, 25, 'Countdown'),
+      throwsStateError,
+    );
+    expect(fixture.focus.recordedSecondsFor({task.id}), 3);
+  });
+
+  test('proposal approval revalidates shared access and preserves the existing plan', () async {
+    final fixture = Fixture();
+    await fixture.schedule();
+    final task = Task(
+      id: sharedTaskKey('record'),
+      title: sharedTaskLabel('record'),
+    );
+    fixture.tasks.setSharedTasks([task]);
+    final draft = fixture.plan.preview(Fixture.date);
+    fixture.tasks.refreshShared = () async => fixture.tasks.setSharedTasks([]);
+    await expectLater(fixture.plan.approve(draft), throwsStateError);
+    expect(fixture.plan.day(Fixture.date).version, 1);
+    expect(
+      fixture.plan.visibleApproved(Fixture.date).single.id,
+      Fixture.task.id,
+    );
+  });
+
   test(
     'changed, expired, blocked, and removed blocks cannot start focus',
     () async {

@@ -9,7 +9,13 @@ class Goal {
       startDate = d['start_date'] as String?,
       targetDate = d['target_date'] as String?,
       status = d['status'] as String,
-      progress = (d['progress'] as num? ?? 0).toInt(),
+      progress = (d['progress'] as num?)?.toInt(),
+      updatedAt = d['updated_at'] as String?,
+      checkedAt = d['progress_checked_at'] as String?,
+      progressSource = d['progress_source'] as String? ?? 'none',
+      completedCount = (d['completed_count'] as num? ?? 0).toInt(),
+      missingTasks = ((d['missing_personal_tasks'] as List?) ?? [])
+          .cast<String>(),
       itemCount = (d['item_count'] as num? ?? 0).toInt(),
       canEdit = d['can_edit'] != false,
       milestones = ((d['milestones'] as List?) ?? [])
@@ -20,7 +26,11 @@ class Goal {
           .toList();
   final String id, title, description, status;
   final String? projectId, startDate, targetDate;
-  final int progress, itemCount;
+  final int? progress;
+  final int itemCount, completedCount;
+  final String progressSource;
+  final String? updatedAt, checkedAt;
+  final List<String> missingTasks;
   final bool canEdit;
   final List<Milestone> milestones;
   final List<TaskItem> tasks;
@@ -31,6 +41,7 @@ class Goal {
     'start_date': startDate,
     'target_date': targetDate,
     'status': newStatus ?? status,
+    if (updatedAt != null) 'expected_updated_at': updatedAt,
   };
 }
 
@@ -64,11 +75,13 @@ class TaskItem {
       minutes = (d['estimated_minutes'] as num).toInt(),
       projectId = d['project_id'] as String?,
       assigneeId = d['assignee_id'] as String?,
+      ownerId = d['owner_id'] as String?,
       assigneeName = d['assignee_name'] as String?,
       deadline = d['deadline'] as String?,
+      personal = d['personal'] == true,
       canEdit = d['can_edit'] != false;
   final String id, title, description, status;
   final int minutes;
-  final bool canEdit;
-  final String? projectId, assigneeId, assigneeName, deadline;
+  final bool canEdit, personal;
+  final String? projectId, assigneeId, ownerId, assigneeName, deadline;
 }

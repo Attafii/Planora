@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/services/app_session.dart';
+import '../tasks/task_store.dart';
 import 'focus_store.dart';
 import 'focus_task_link.dart';
 import 'smart_tools.dart';
@@ -262,6 +264,7 @@ class _FocusSetupState extends State<FocusSetup> {
   int minutes = 25;
   late ScheduledFocus? slot;
   String? startError;
+  bool checkingAccess = false;
 
   String? get slotIssue {
     final scheduled = slot;
@@ -289,8 +292,8 @@ class _FocusSetupState extends State<FocusSetup> {
     );
   }
 
-  void begin(BuildContext context) {
-    if (!form.currentState!.validate()) return;
+  Future<void> begin(BuildContext context) async {
+    if (checkingAccess || !form.currentState!.validate()) return;
     if (widget.store.active != null) {
       setState(
         () => startError = 'Continue or finish the active session first.',
@@ -302,11 +305,23 @@ class _FocusSetupState extends State<FocusSetup> {
       if (selected == null) {
         widget.store.start(title.text, minutes, mode);
       } else {
+        if (isSharedTaskKey(selected.taskId)) {
+          setState(() {
+            checkingAccess = true;
+            startError = null;
+          });
+          await widget.store.taskContext?.tasks.refreshShared?.call();
+          if (!context.mounted || !identical(slot, selected)) return;
+        }
         widget.store.startScheduled(selected, minutes, mode);
       }
       if (widget.store.active case final session?) openTimer(context, session);
     } on StateError catch (error) {
-      setState(() => startError = error.message);
+      if (mounted) setState(() => startError = error.message);
+    } on ApiFailure catch (error) {
+      if (mounted) setState(() => startError = error.message);
+    } finally {
+      if (mounted && checkingAccess) setState(() => checkingAccess = false);
     }
   }
 
@@ -470,11 +485,13 @@ class _FocusSetupState extends State<FocusSetup> {
               ],
               const SizedBox(height: 30),
               FilledButton.icon(
-                onPressed: issue != null || active != null
+                onPressed: checkingAccess || issue != null || active != null
                     ? null
                     : () => begin(c),
                 icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('Begin focus'),
+                label: Text(
+                  checkingAccess ? 'Checking project access…' : 'Begin focus',
+                ),
               ),
             ],
           ),
@@ -980,6 +997,8 @@ class _SessionDetailState extends State<SessionDetail> {
       if (mounted) {
         setState(() {
           taskError = error is StateError
+              ? error.message
+              : error is ApiFailure
               ? error.message
               : 'Could not mark the task done. Try again.';
         });

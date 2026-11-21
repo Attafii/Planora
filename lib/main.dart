@@ -81,6 +81,7 @@ class _PlanifyRootState extends State<PlanifyRoot> {
       workspace: (_) => Workspace(
         key: ValueKey(accountSession.account!.id),
         session: accountSession,
+        services: services,
       ),
     ),
   );

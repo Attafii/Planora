@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_services.dart';
 import '../../../core/utils/validators.dart';
+import '../../../core/utils/write_id.dart';
 import '../../../core/widgets/product_widgets.dart';
 import '../models/goal.dart';
+import '../../tasks/task_store.dart';
 
 Future<TaskItem?> createLinkedTask(BuildContext context, {String? projectId}) =>
     showModalBottomSheet<TaskItem>(
@@ -21,6 +23,7 @@ class _TaskCreateSheet extends StatefulWidget {
 }
 
 class _TaskCreateSheetState extends State<_TaskCreateSheet> {
+  late final _requestId = newWriteId();
   final _form = GlobalKey<FormState>(),
       _title = TextEditingController(),
       _minutes = TextEditingController(text: '45'),
@@ -54,7 +57,7 @@ class _TaskCreateSheetState extends State<_TaskCreateSheet> {
             ),
             const SizedBox(height: 12),
             const Text(
-              'This creates a task record for this workspace. It can be opened by the shared Tasks module.',
+              'This task belongs to the project. Assigned members can plan it in their calendar.',
             ),
             const SizedBox(height: 20),
             TextFormField(
@@ -87,6 +90,7 @@ class _TaskCreateSheetState extends State<_TaskCreateSheet> {
                 if (!_form.currentState!.validate()) return;
                 final task = await AppScope.of(context).goals.createTask({
                   'title': _title.text,
+                  'request_id': _requestId,
                   'estimated_minutes': int.parse(_minutes.text),
                   'deadline': _date.text.isEmpty ? null : _date.text,
                   'project_id': widget.projectId,
@@ -140,31 +144,50 @@ class _TaskPickerState extends State<_TaskPicker> {
             },
           ),
           const SizedBox(height: 16),
-          BusyButton(
-            label: 'Create linked task',
-            outlined: true,
-            onPressed: () async {
-              final t = await createLinkedTask(
-                context,
-                projectId: widget.goal.projectId,
-              );
-              if (t != null && context.mounted) {
-                await AppScope.of(context).goals.link(widget.goal.id, t.id);
-                if (context.mounted) Navigator.pop(context);
-              }
-            },
-          ),
+          if (widget.goal.projectId == null)
+            BusyButton(
+              label: 'Sync personal tasks',
+              outlined: true,
+              onPressed: () async {
+                await AppScope.of(context).workActivity?.syncPersonal();
+                _list.currentState?.refresh();
+              },
+            )
+          else
+            BusyButton(
+              label: 'Create linked task',
+              outlined: true,
+              onPressed: () async {
+                final t = await createLinkedTask(
+                  context,
+                  projectId: widget.goal.projectId,
+                );
+                if (t != null && context.mounted) {
+                  await AppScope.of(context).goals
+                      .link(widget.goal.id, t.id, personal: t.personal);
+                  if (context.mounted) Navigator.pop(context);
+                }
+              },
+            ),
           const SizedBox(height: 20),
           Expanded(
             child: PagedView<TaskItem>(
               key: _list,
-              load: (offset) => AppScope.of(context).goals.tasks(
-                search: _search,
-                projectId: widget.goal.projectId,
-                offset: offset,
-              ),
+              load: (offset) {
+                final goals = AppScope.of(context).goals;
+                final project = widget.goal.projectId;
+                return project == null
+                    ? goals.personalTasks(search: _search, offset: offset)
+                    : goals.tasks(
+                        search: _search,
+                        projectId: project,
+                        offset: offset,
+                      );
+              },
               emptyTitle: 'No work to link',
-              emptyMessage: 'Create a task in the same workspace as this goal.',
+              emptyMessage: widget.goal.projectId == null
+                  ? 'Add work in My tasks, then sync it here to link it.'
+                  : 'Create a task in this project.',
               itemBuilder: (ctx, t) {
                 final allowed = t.projectId == widget.goal.projectId,
                     linked = widget.goal.tasks.any((x) => x.id == t.id);
@@ -183,7 +206,7 @@ class _TaskPickerState extends State<_TaskPicker> {
                     outlined: true,
                     onPressed: () async {
                       await AppScope.of(context).goals
-                          .link(widget.goal.id, t.id);
+                          .link(widget.goal.id, t.id, personal: t.personal);
                       if (context.mounted) Navigator.pop(context);
                     },
                   ),
@@ -205,77 +228,96 @@ class LinkedTaskPage extends StatelessWidget {
     title: 'Linked task',
     subtitle: 'Shared task record',
     child: AsyncView<TaskItem>(
+      revalidateEvery: const Duration(seconds: 15),
       load: () => AppScope.of(context).goals.task(id),
-      builder: (ctx, t, refresh) => SingleChildScrollView(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 700),
-          child: Surface(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t.title,
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  t.description.isEmpty
-                      ? 'No description added.'
-                      : t.description,
-                ),
-                const SizedBox(height: 24),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    StatusChip(t.status),
-                    StatusChip('${t.minutes} minutes'),
-                    StatusChip(readableDate(t.deadline)),
-                  ],
-                ),
-                if (t.assigneeName != null) ...[
-                  const SizedBox(height: 16),
-                  Text('Assigned to ${t.assigneeName}'),
-                ],
-                const Divider(),
-                Text(
-                  'Update progress',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (final s in {
-                      'todo': 'To do',
-                      'in_progress': 'In progress',
-                      'blocked': 'Blocked',
-                      'completed': 'Complete',
-                    }.entries)
-                      BusyButton(
-                        label: s.value,
-                        outlined: t.status != s.key,
-                        enabled: t.canEdit,
-                        onPressed: () async {
-                          await AppScope.of(context).goals
-                              .updateTask(t.id, s.key);
-                          refresh();
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Task estimates and calendar placement are managed by the shared task and calendar modules.',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+      builder: (ctx, t, refresh) {
+        final services = AppScope.of(context);
+        final work = services.workActivity;
+        final user = services.session.user?.id;
+        final canPlan =
+            t.projectId != null &&
+            t.canEdit &&
+            (t.assigneeId ?? t.ownerId) == user &&
+            (t.status == 'todo' || t.status == 'in_progress');
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 700),
+            child: Surface(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t.title,
+                    style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 16),
+                  Text(
+                    t.description.isEmpty
+                        ? 'No description added.'
+                        : t.description,
+                  ),
+                  const SizedBox(height: 24),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      StatusChip(t.status),
+                      StatusChip('${t.minutes} minutes'),
+                      StatusChip(readableDate(t.deadline)),
+                    ],
+                  ),
+                  if (t.assigneeName != null) ...[
+                    const SizedBox(height: 16),
+                    Text('Assigned to ${t.assigneeName}'),
+                  ],
+                  const Divider(),
+                  if (work != null && canPlan)
+                    Text('Calendar label: ${sharedTaskLabel(t.id)}'),
+                  if (work != null && canPlan)
+                    BusyButton(
+                      label: 'Plan in my calendar',
+                      icon: Icons.calendar_month_outlined,
+                      onPressed: work.openCalendar,
+                    ),
+                  Text(
+                    'Update progress',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      for (final s in {
+                        'todo': 'To do',
+                        'in_progress': 'In progress',
+                        'blocked': 'Blocked',
+                        'completed': 'Complete',
+                      }.entries)
+                        BusyButton(
+                          label: s.value,
+                          outlined: t.status != s.key,
+                          enabled: t.canEdit,
+                          onPressed: () async {
+                            await AppScope.of(context).goals
+                                .updateTask(t.id, s.key);
+                            refresh();
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Calendar slots and focus time belong to your personal workspace.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     ),
   );
 }

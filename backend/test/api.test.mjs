@@ -45,7 +45,7 @@ test('invitations are account-bound, revocable, single-use and permission-safe',
  let r=await request('POST',`/projects/${project.id}/invitations`,{email:viewer.user.email,role:'viewer'},owner.token);assert.equal(r.status,201);const inv=r.data;
  assert.equal((await request('GET',`/invitations/${inv.token}`,undefined,other.token)).status,403);
  assert.equal((await request('POST',`/invitations/${inv.token}/respond`,{accept:true},viewer.token)).status,200);
- assert.equal((await request('POST',`/invitations/${inv.token}/respond`,{accept:true},viewer.token)).status,409);
+ assert.equal((await request('POST',`/invitations/${inv.token}/respond`,{accept:true},viewer.token)).status,200);
  assert.equal((await request('POST',`/projects/${project.id}/comments`,{body:'Cannot write'},viewer.token)).status,403);
  assert.equal((await request('PATCH',`/projects/${project.id}/members/${owner.user.id}`,{role:'viewer'},owner.token)).status,409);
  r=await request('POST',`/projects/${project.id}/invitations`,{email:other.user.email,role:'collaborator'},owner.token);const revoked=r.data;
