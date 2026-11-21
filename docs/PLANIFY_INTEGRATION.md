@@ -9,3 +9,11 @@ Start the shared server from `backend` using `npm ci` and `npm start`. In the re
 Create a Planify account to open the workspace. For live cloud suggestions, set `AI_API_KEY`, `AI_MODEL`, and the provider's `AI_BASE_URL` in the backend environment, then enable cloud AI in Privacy. The branches' existing AI adapters use OpenAI-compatible provider endpoints. The calendar engine and local assistant can run independently of a configured AI provider.
 
 Personal tasks, schedules, focus sessions, reminders and daily check-ins use per-account device storage and sync through the account API. Project and goal data live on the workspace server. See [Personal data sync and session restoration](EYA_SESSION_AND_SYNC.md) for offline behavior, conflicts, and deployment dependencies, and [Goals, projects, and recorded work](AHMED_WORK_PROGRESS.md) for activity and permission rules.
+
+## Mobile daily flow
+
+On registration, Planify uses the device's IANA timezone when available. If the host cannot provide a supported timezone, Planify uses UTC. Change the calendar timezone from Account and preferences. Today refreshes when the app resumes. Completed, blocked and elapsed task blocks remain visible in the day timeline with their status. They offer a focus action only while eligible.
+
+For an Android debug smoke test, run the local API, connect an emulator, run `adb reverse tcp:4100 tcp:4100`, and launch with `flutter run -d <device-id> --dart-define=API_BASE_URL=http://127.0.0.1:4100`. Exercise onboarding, task capture, calendar proposal and approval, linked focus, interruption recovery and sync after reconnect. Check the dock with large system text and reduced motion. Use `flutter build apk --release` for the Android build check. The repository's release build uses its development signing configuration. Building and testing on iOS requires macOS, Xcode and a connected device or simulator.
+
+Offline sessions still use the account's existing personal-data queue. Cloud AI requires consent and a configured provider. External calendar connections remain unavailable until a provider is configured.

@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:timezone/timezone.dart' as tz;
 import 'package:http/http.dart' as http;
 
 class ApiFailure implements Exception {
@@ -187,6 +189,20 @@ class AppSession extends ChangeNotifier {
     }
   }
 
+  Future<String> _registrationTimezone() async {
+    try {
+      final zone = await FlutterTimezone.getLocalTimezone().timeout(
+        const Duration(seconds: 2),
+      );
+      if (tz.timeZoneDatabase.locations.containsKey(zone.identifier)) {
+        return zone.identifier;
+      }
+    } catch (_) {
+      // Some hosts expose no usable IANA zone.
+    }
+    return 'UTC';
+  }
+
   Future<void> authenticate({
     required bool register,
     required String email,
@@ -194,6 +210,8 @@ class AppSession extends ChangeNotifier {
     String? name,
   }) async {
     final generation = ++_generation;
+    final timezone = register ? await _registrationTimezone() : null;
+    if (_disposed || generation != _generation) return;
     final data = await request(
       'POST',
       register ? '/auth/register' : '/auth/login',
@@ -202,7 +220,7 @@ class AppSession extends ChangeNotifier {
         'password': password,
         if (register) ...{
           'name': name!.trim(),
-          'timezone': 'Africa/Tunis',
+          'timezone': timezone,
           'language': 'en',
         },
       },

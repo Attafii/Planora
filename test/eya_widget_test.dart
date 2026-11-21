@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -23,6 +24,53 @@ Map<String, dynamic> account({
   'preferences': {'theme': theme, 'cloud_ai': false},
 };
 void main() {
+  test(
+    'registration sends the device IANA zone or UTC when unsupported',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('flutter_timezone');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      for (final (device, expected) in [
+        ('America/New_York', 'America/New_York'),
+        ('unknown zone', 'UTC'),
+      ]) {
+        messenger.setMockMethodCallHandler(channel, (_) async => device);
+        late Map<String, dynamic> submitted;
+        final session = AppSession(
+          client: MockClient((request) async {
+            expect(request.url.path, '/auth/register');
+            submitted = jsonDecode(request.body) as Map<String, dynamic>;
+            return http.Response(
+              jsonEncode({
+                'user': {...account(), 'timezone': submitted['timezone']},
+                'expires_at': DateTime.now()
+                    .add(const Duration(days: 1))
+                    .toUtc()
+                    .toIso8601String(),
+                'token': 'registration-fixture',
+              }),
+              201,
+            );
+          }),
+        );
+        try {
+          await session.authenticate(
+            register: true,
+            email: 'new@example.test',
+            password: 'example-registration-password',
+            name: 'New Planner',
+          );
+          expect(submitted['timezone'], expected);
+          expect(session.account?.timezone, expected);
+        } finally {
+          session.dispose();
+        }
+      }
+    },
+  );
+
   setUp(() {
     tz.initializeTimeZones();
     FlutterSecureStorage.setMockInitialValues({});

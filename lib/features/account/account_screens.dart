@@ -98,6 +98,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   Future<void> submit() async {
+    if (busy) return;
     setState(() {
       fields = {};
       error = null;

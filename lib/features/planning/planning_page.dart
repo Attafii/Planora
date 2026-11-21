@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../core/services/app_session.dart';
 
 import '../../app/theme/planify_brand.dart';
+import '../focus/focus_task_link.dart';
 import '../tasks/task_store.dart';
 import 'calendar_panel.dart';
 import 'planning_agent.dart';
@@ -661,6 +662,12 @@ class _PlanningPageState extends State<PlanningPage> {
 
   Future<void> showBlock(PlanBlock block, bool canManage) async {
     final selectedDate = date;
+    final issue = block.kind == BlockKind.task && widget.onStartFocus != null
+        ? FocusTaskContext(
+            store.tasks,
+            store,
+          ).issueForBlock(selectedDate, block)
+        : null;
     final action = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -668,14 +675,17 @@ class _PlanningPageState extends State<PlanningPage> {
         content: Text(
           '${blockType(block.kind)}\n'
           '${MaterialLocalizations.of(context).formatFullDate(DateTime.parse(date))}\n'
-          '${intervalLabel(block.start, block.end)}',
+          '${intervalLabel(block.start, block.end)}'
+          '${issue == null ? '' : '\n\n$issue'}',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
           ),
-          if (block.kind == BlockKind.task && widget.onStartFocus != null)
+          if (block.kind == BlockKind.task &&
+              widget.onStartFocus != null &&
+              issue == null)
             FilledButton.icon(
               onPressed: () => Navigator.pop(context, 'focus'),
               icon: const Icon(Icons.play_arrow_rounded),

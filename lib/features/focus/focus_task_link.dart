@@ -62,6 +62,15 @@ class FocusTaskContext {
   final TaskStore tasks;
   final PlanningStore plan;
 
+  String? issueForBlock(String date, PlanBlock block) {
+    try {
+      eligibleTask(ScheduledFocus.fromBlock(block, date, plan.clock.zone()));
+      return null;
+    } on StateError catch (error) {
+      return error.message;
+    }
+  }
+
   Task eligibleTask(ScheduledFocus slot) {
     final task = tasks.get(slot.taskId);
     if (task == null || task.skipped) {

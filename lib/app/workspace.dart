@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 
 import 'app_services.dart' show AppServices;
+import 'daily_dock.dart';
 import 'today_page.dart';
 import 'work_activity.dart';
 
@@ -408,19 +409,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     child: MediaQuery.removePadding(
                       context: context,
                       removeBottom: true,
-                      child: NavigationBar(
-                        height: 66,
-                        elevation: 0,
-                        backgroundColor: Colors.transparent,
-                        selectedIndex: selected,
-                        onDestinationSelected: select,
-                        destinations: [
-                          for (final (icon, label) in destinations)
-                            NavigationDestination(
-                              icon: Icon(icon),
-                              label: label,
-                            ),
-                        ],
+                      child: DailyDock(
+                        destinations: destinations,
+                        selected: selected,
+                        onSelect: select,
                       ),
                     ),
                   ),
@@ -462,9 +454,13 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     }
     return ListTile(
       dense: true,
-      title: Text(syncMessage),
+      title: Semantics(liveRegion: true, child: Text(syncMessage)),
       trailing: TextButton(
-        onPressed: sync.updates.isEmpty ? sync.sync : showSync,
+        onPressed: sync.updates.isNotEmpty
+            ? showSync
+            : sync.syncing
+            ? null
+            : sync.sync,
         child: Text(sync.updates.isEmpty ? 'Retry' : 'Review'),
       ),
     );

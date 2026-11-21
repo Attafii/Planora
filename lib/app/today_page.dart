@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../features/focus/focus_task_link.dart';
 import '../features/planning/planning_engine.dart';
 import '../features/planning/planning_store.dart';
 import '../features/tasks/task_store.dart';
@@ -32,7 +33,7 @@ class TodayPage extends StatefulWidget {
   State<TodayPage> createState() => _TodayPageState();
 }
 
-class _TodayPageState extends State<TodayPage> {
+class _TodayPageState extends State<TodayPage> with WidgetsBindingObserver {
   late DateTime now = widget.planning.localNow;
   Timer? timer;
   static const moods = ['Low', 'Quiet', 'Steady', 'Good', 'Great'];
@@ -46,15 +47,25 @@ class _TodayPageState extends State<TodayPage> {
     loadMood();
     widget.planning.addListener(publishWidget);
     publishWidget();
-    timer = Timer.periodic(const Duration(minutes: 1), (_) {
-      final previous = dayKey(now);
-      setState(() => now = widget.planning.localNow);
-      if (previous != dayKey(now)) {
-        publishWidget();
-        mood = null;
-        loadMood();
-      }
+    WidgetsBinding.instance.addObserver(this);
+    timer = Timer.periodic(const Duration(minutes: 1), (_) => refreshDay());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) refreshDay();
+  }
+
+  void refreshDay() {
+    final previous = dayKey(now);
+    setState(() {
+      now = widget.planning.localNow;
+      if (previous != dayKey(now)) mood = null;
     });
+    if (previous != dayKey(now)) {
+      publishWidget();
+      loadMood();
+    }
   }
 
   Future<void> publishWidget({bool clear = false}) async {
@@ -139,6 +150,7 @@ class _TodayPageState extends State<TodayPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.planning.removeListener(publishWidget);
     publishWidget(clear: true);
     timer?.cancel();
@@ -151,9 +163,18 @@ class _TodayPageState extends State<TodayPage> {
     builder: (context, _) {
       final theme = Theme.of(context);
       final colors = theme.colorScheme;
-      final blocks = widget.planning.calendarEntries(dayKey(now));
+      final date = dayKey(now);
+      final blocks = widget.planning.calendarEntries(date);
       final minute = now.hour * 60 + now.minute;
-      final next = blocks.where((b) => b.end > minute).firstOrNull;
+      final focus = FocusTaskContext(widget.tasks, widget.planning);
+      final issues = {
+        for (final block in blocks)
+          if (block.kind == BlockKind.task)
+            block: focus.issueForBlock(date, block),
+      };
+      final next = blocks
+          .where((b) => b.end > minute && issues[b] == null)
+          .firstOrNull;
       final ready = widget.tasks
           .forPlanningDate(dayKey(now))
           .where(
@@ -250,10 +271,14 @@ class _TodayPageState extends State<TodayPage> {
               leading: Text(clockLabel(block.start)),
               title: Text(block.title),
               subtitle: Text(
-                '${block.end - block.start} min · ${block.kind.name}',
+                '${block.end - block.start} min · ${block.kind.name}'
+                '${issues[block] == null ? '' : '\n${issues[block]}'}',
               ),
               trailing: block == next ? const Icon(Icons.timelapse) : null,
-              onTap: block.kind == BlockKind.task && widget.onStartFocus != null
+              onTap:
+                  block.kind == BlockKind.task &&
+                      issues[block] == null &&
+                      widget.onStartFocus != null
                   ? () => widget.onStartFocus!(dayKey(now), block)
                   : null,
             ),
