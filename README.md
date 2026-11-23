@@ -25,7 +25,7 @@ Planify brings tasks, a real-date calendar, focus sessions, goals, projects, and
 - **Goals and projects:** linked tasks, attributed progress, collaboration, and server-enforced access rules.
 - **Account and privacy:** email and password access, Google sign-in on the web preview, secure sessions, preferences, onboarding, offline personal data, and sync conflict review.
 - **AI assistance:** conversational help and reviewable actions through a configured OpenRouter free model. Cloud AI requires user consent; provider results and suggestions are never presented as saved actions until confirmed.
-- **Google Calendar:** optionally connect an account to view upcoming events and create an event in the primary calendar. These events are currently shown separately from approved Planify plans.
+- **Google Calendar:** optionally connect an account to view upcoming events and create an event in the primary calendar. Preview Google busy-time imports as scheduling constraints and confirm exports of approved Planify tasks.
 
 These screenshots were captured from the Flutter web preview at a 390 × 844 phone viewport using a new account on 23 November 2026. Empty states are genuine and progress figures are never sample data.
 
@@ -45,7 +45,7 @@ flutter pub get
 flutter run -d chrome --web-port 8052 --dart-define=API_BASE_URL=http://localhost:4100
 ```
 
-The API listens on port 4100 by default. For Android emulator networking and native release constraints, see [Planify integration](docs/PLANIFY_INTEGRATION.md). Google sign-in currently uses the configured web OAuth client; Android and iOS need their own Google OAuth setup. See [Google integration](docs/GOOGLE_INTEGRATION.md).
+The API listens on port 4100 by default. For Android emulator networking and native release constraints, see [Planify integration](docs/PLANIFY_INTEGRATION.md). Native Google sign-in uses the official Flutter plugin; Android and iOS OAuth registration must match the app identifiers and signing certificate. See [Google integration](docs/GOOGLE_INTEGRATION.md).
 
 ## Verify
 
@@ -72,5 +72,5 @@ The Flutter app uses `AppSession` for account identity, session restoration, and
 ## Current limits
 
 
-Google Calendar access requires a configured Google Cloud project and user consent. It does not yet import busy events into Planify's scheduling constraints or export approved plans. Android and iOS Google clients are pending. Email delivery for password recovery is not configured. Sensitive account export and deletion remain gated on the documented policy decision. The local web server is a development preview, not production hosting.
+Google Calendar access requires a configured Google Cloud project and user consent. Calendar import/export is manual and reviewed per selected day within the next 30 days; deletions are not propagated automatically. Android and iOS Google Cloud client registration is still required. Email delivery for password recovery is not configured. Sensitive account export and deletion remain gated on the documented policy decision. The local web server is a development preview, not production hosting.
 
