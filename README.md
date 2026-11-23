@@ -27,7 +27,7 @@ Planify brings tasks, a real-date calendar, focus sessions, goals, projects, and
 - **AI assistance:** conversational help and reviewable actions through a configured OpenRouter free model. Cloud AI requires user consent; provider results and suggestions are never presented as saved actions until confirmed.
 - **Google Calendar:** optionally connect an account to view upcoming events and create an event in the primary calendar. These events are currently shown separately from approved Planify plans.
 
-The screenshots show a new account on 23 November 2026. Empty states are genuine and progress figures are never sample data.
+These screenshots were captured from the Flutter web preview at a 390 × 844 phone viewport using a new account on 23 November 2026. Empty states are genuine and progress figures are never sample data.
 
 ## Run locally
 
