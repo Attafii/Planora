@@ -1,40 +1,53 @@
 # Planify
 
-Planify brings together personal tasks, calendar planning, focus, collaboration,
-goals, and AI assistance in one authenticated workspace. See
-[Personal data sync and session restoration](docs/EYA_SESSION_AND_SYNC.md) for
-the account and offline behavior.
+**A calmer way to turn plans into progress.**
 
-Session/security controls, profile quality guidance, searchable account Help,
-AI context preview, and policy-gated personal data tools are documented in
-[Eya account features setup](docs/EYA_ACCOUNT_FEATURES_SETUP.md).
+Planify brings tasks, a real-date calendar, focus sessions, goals, projects, and a conversational assistant into one place. Capture what matters, review a schedule around commitments and breaks, then record the work you actually did. Planify is a Flutter app for Android and iOS, with a web preview for development.
+
+![Planify Today screen showing an empty first-use plan](docs/screenshots/today.png)
+
+## From intention to a workable day
+
+1. **Capture and break down work.** Create tasks, set prerequisites and recurrence, and review AI-proposed subtasks before saving.
+2. **Make time for it.** See month, week, and day views. Add fixed commitments and breaks; generate a schedule proposal that explains placements and unscheduled work. Approve it before your calendar changes.
+3. **Follow through.** Start focus from a scheduled task, pause when needed, and record active time. Finishing a focus session does not silently complete its task.
+4. **Adjust as life happens.** Report an interruption and review a revised plan. You decide whether to apply it.
+5. **Stay in sync.** Account sessions restore after restart. Personal changes can queue offline, with visible sync and conflict recovery when connectivity returns.
+
+| Calendar planning | Account access |
+| --- | --- |
+| ![Planify month calendar and agenda with working hours and a break](docs/screenshots/calendar.png) | ![Planify sign-in with email and Google](docs/screenshots/sign-in.png) |
+
+## What is available
+
+- **Tasks and next actions:** dependencies, recurring occurrences, breakdown review, and recommendations grounded in task state.
+- **Planning and focus:** scheduling around working hours and fixed events, approval and revision history, linked focus sessions, and recorded task activity.
+- **Goals and projects:** linked tasks, attributed progress, collaboration, and server-enforced access rules.
+- **Account and privacy:** email and password access, Google sign-in on the web preview, secure sessions, preferences, onboarding, offline personal data, and sync conflict review.
+- **AI assistance:** conversational help and reviewable actions through a configured OpenRouter free model. Cloud AI requires user consent; provider results and suggestions are never presented as saved actions until confirmed.
+- **Google Calendar:** optionally connect an account to view upcoming events and create an event in the primary calendar. These events are currently shown separately from approved Planify plans.
+
+The screenshots show a new account on 23 November 2026. Empty states are genuine and progress figures are never sample data.
 
 ## Run locally
 
-Requirements are Flutter matching pubspec.yaml and Node.js 22.17 or later.
+Requirements: Flutter matching `pubspec.yaml` and Node.js 22.17 or later. Configure `backend/.env` from the relevant [integration notes](docs/PLANIFY_INTEGRATION.md). Production needs a Neon `DATABASE_URL`; local development can use the documented database fallback.
 
 ```powershell
 npm --prefix backend ci
 npm --prefix backend start
 ```
 
-In a separate terminal, start Flutter.
+In another terminal:
 
 ```powershell
 flutter pub get
-flutter run -d chrome --web-port 8052
+flutter run -d chrome --web-port 8052 --dart-define=API_BASE_URL=http://localhost:4100
 ```
 
-The API listens on port 4100 by default. Create an account on first use.
-See [Planify integration](docs/PLANIFY_INTEGRATION.md) for API configuration.
+The API listens on port 4100 by default. For Android emulator networking and native release constraints, see [Planify integration](docs/PLANIFY_INTEGRATION.md). Google sign-in currently uses the configured web OAuth client; Android and iOS need their own Google OAuth setup. See [Google integration](docs/GOOGLE_INTEGRATION.md).
 
-For Android emulator use API_BASE_URL=http://10.0.2.2:4100 and a reachable development
-API listener (`HOST=0.0.0.0` only on a trusted local development network). Native
-release builds require an HTTPS API. Android release has Internet permission;
-cleartext HTTP is not enabled in release. iOS/macOS builds require Apple tooling;
-Linux secure storage requires the package's libsecret prerequisites.
-
-## Verification
+## Verify
 
 ```powershell
 npm --prefix backend run check
@@ -44,95 +57,18 @@ flutter analyze
 flutter build web --release
 ```
 
-## Shared integration
+## Architecture and setup
 
-Use `AppSession` in `lib/core/services/app_session.dart` as the single session
-service. It exposes account identity, IANA timezone, language, theme and cloudAi.
-All feature HTTP calls must use `session.request()` to share authorization and
-expiry handling. Tokens are stored through flutter_secure_storage, never ordinary
-preferences. API_BASE_URL is compile-time configuration; use HTTPS outside local
-development. Web storage requires HTTPS or localhost and a secured hosting origin.
+The Flutter app uses `AppSession` for account identity, session restoration, and authorized API requests. The Node backend stores account and workspace data in Neon when `DATABASE_URL` is configured. It keeps Google OAuth secrets and Calendar tokens off the client; Calendar tokens are encrypted at rest. OpenRouter calls stay on the backend and use free models within the configured daily request budget.
 
-Current routes: `/`, `/login`, `/register`, `/forgot-password`, `/profile`,
-`/preferences`, `/privacy`, `/analytics`, `/security`, and public `/help`. Protected routes render authentication
-when no valid session exists. Session expiry resets the authenticated navigator.
-Do not introduce another account/session/preferences store when merging features.
+- [Integration and device setup](docs/PLANIFY_INTEGRATION.md)
+- [Neon and OpenRouter](docs/NEON_OPENROUTER.md)
+- [Google sign-in and Calendar](docs/GOOGLE_INTEGRATION.md)
+- [Eya session and personal sync](docs/EYA_SESSION_AND_SYNC.md)
+- [Personalized onboarding and sync help](docs/EYA_AI_SETUP.md)
+- [Conversational assistant](docs/CONVERSATIONAL_AGENT.md)
+- [Brand assets and licenses](assets/branding/README.md)
 
-## Explicit dependencies and deferred behavior
+## Current limits
 
-- Reset requests and reset confirmation return `503 email_unavailable` until an
-  approved mail provider, expiring one-time tokens and session revocation policy
-  are implemented. The UI never claims an email was sent.
-- Email is visibly unverified. Email editing is not supported until verification
-  delivery exists. Name editing is supported; users cannot patch sensitive fields.
-- Export/deletion return `503 policy_pending` by default. The implemented account-only
-  export/deletion engine requires an explicitly approved retention/shared-record/recovery
-  policy; sensitive actions require recent password confirmation. See the setup document.
-- Account/security notices are available in-app. External notification delivery and
-  focus statistics remain unavailable until their delivery/source dependencies exist.
-- Cloud AI starts off. Its versioned preference and timestamp persist; this module
-  never invokes an AI provider. Assistant integration must read current consent on
-  every request and enforce consent server-side before transmitting chosen context.
-  Personal insights adds a separate allowlisted preview and versioned purpose consent;
-  both this consent and the general Cloud AI preference must allow context release.
-- Account surfaces support English/French and light/dark/system appearance.
-  Public authentication and transport/validation error messages are English.
-
-## Analytics contract
-
-`GET /users/me/analytics?from=<UTC ISO timestamp>&to=<UTC ISO timestamp>` uses an
-inclusive start and exclusive end, with a maximum range of 366 days. Flutter
-calculates calendar boundaries using the saved IANA timezone, including DST. Week
-starts Monday; week/month include today and are incomplete periods. Focus measures
-are absent. No client endpoint accepts activity events or metrics.
-
-The default API reports null metrics with `status: unavailable` until authoritative
-sources are integrated. It never manufactures zeroes or sample data for the app.
-
-Inject the server-only `activitySource` into `createApi` to supply verified records:
-
-```js
-createApi({
-  activitySource: async ({ userId, from, to, timezone }) => ({
-    tasks: await taskRepository.accessibleCompletedForOwner(userId, from, to),
-    goals: await goalRepository.accessibleCompletedForOwner(userId, from, to),
-  }),
-});
-```
-
-Each record must contain `{id, owner_id, completed_at, accessible}` from the
-server's authoritative data and current access query. Missing sources return null;
-connected sources with no records return an empty array. Aggregation filters by
-owner, current access and time range, then counts each source record ID once.
-Collaborators' private records are excluded. These metrics count currently
-completed records by their authoritative completion timestamp; they do not score
-productivity. Team approval of definitions and adapters is still required.
-
-The UI displays connected aggregates with textual metric summaries and distinguishes
-partial/unavailable data from zero. Source drill-down links await real authorized
-feature routes; this branch does not invent those routes or write workflows.
-
-## API deployment
-
-Configure PORT, HOST, DATABASE_URL and comma-separated ALLOWED_ORIGINS.
-The integrated server uses Neon for accounts, sessions, personal sync and workspace
-data when DATABASE_URL is set. Production requires this URL. See
-[Neon and OpenRouter setup](docs/NEON_OPENROUTER.md) for migrations and free AI limits. Defaults
-are local-only. Terminate TLS at a trusted reverse proxy; preserve the correct
-client address for per-address rate limiting (do not trust arbitrary forwarded
-headers). The built-in in-memory rate limiter is for a single API process; a
-multi-instance deployment needs shared limits. Sessions last seven days, support
-multiple devices, and are individually revocable. Passwords use salted scrypt;
-only SHA-256 session-token hashes are stored. SQLite remains a local development fallback when DATABASE_URL is absent. Never log request bodies
-or Authorization headers. Plan production backups, database access controls and
-recovery before deployment. The local preview is not a production hosting server.
-
-## Branding
-
-Eya's screens use the supplied Planify identity: navy, blue, teal, violet and
-warm off-white; Manrope display type and Inter body type. The logo is a scalable
-vector recreation of the supplied board. See assets/branding/README.md for the
-editable symbol, font licenses and platform-icon generation instructions.
-
-Personalized account setup and metadata-only sync explanations are described in
-[Eya AI setup and sync help](docs/EYA_AI_SETUP.md).
+Google Calendar access requires a configured Google Cloud project and user consent. It does not yet import busy events into Planify's scheduling constraints or export approved plans. Android and iOS Google clients are pending. Email delivery for password recovery is not configured. Sensitive account export and deletion remain gated on the documented policy decision. The local web server is a development preview, not production hosting.
