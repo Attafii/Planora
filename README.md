@@ -2,7 +2,7 @@
 
 **A calmer way to turn plans into progress.**
 
-Planify brings tasks, a real-date calendar, focus sessions, goals, projects, and a conversational assistant into one place. Capture what matters, review a schedule around commitments and breaks, then record the work you actually did. Planify is a Flutter app for Android and iOS, with a web preview for development.
+Planify brings tasks a real-date calendar, focus sessions, goals, projects, and a conversational assistant into one place. Capture what matters, review a schedule around commitments and breaks, then record the work you actually did. Planify is a Flutter app for Android and iOS, with a web preview for development.
 
 ![Planify Today screen showing an empty first-use plan](docs/screenshots/today.png)
 
