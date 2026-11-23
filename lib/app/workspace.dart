@@ -147,6 +147,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => PlanningPage(
+          session: widget.session,
           store: planning,
           agent: planningAgent,
           onStartFocus: startFocus,
@@ -189,6 +190,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => PlanningPage(
+            session: widget.session,
             store: planning,
             agent: planningAgent,
             initialInterruptionId: id,
@@ -404,6 +406,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                           ),
                         ),
                         PlanningPage(
+                          session: widget.session,
                           store: planning,
                           embedded: true,
                           agent: planningAgent,

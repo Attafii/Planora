@@ -1,3 +1,5 @@
+import 'google_calendar_page.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -20,11 +22,13 @@ class PlanningPage extends StatefulWidget {
     super.key,
     required this.store,
     this.embedded = false,
+    this.session,
     this.agent = const PlanningAgent(),
     this.initialInterruptionId,
     this.syncStatus,
     this.onStartFocus,
   });
+  final AppSession? session;
   final PlanningStore store;
   final bool embedded;
   final PlanningAgent agent;
@@ -459,8 +463,16 @@ class _PlanningPageState extends State<PlanningPage> {
             ),
             IconButton(
               tooltip: 'External calendars',
-              onPressed: externalCalendars,
-              icon: const Icon(Icons.link_off_outlined),
+              onPressed: widget.session == null
+                  ? externalCalendars
+                  : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            GoogleCalendarPage(session: widget.session!),
+                      ),
+                    ),
+              icon: const Icon(Icons.calendar_month_outlined),
             ),
             const SizedBox(width: 8),
           ],

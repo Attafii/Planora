@@ -1,0 +1,33 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {googleIntegration, seal, unseal} from './google-integration.mjs';
+const key='ab'.repeat(32);
+test('encrypted credentials reject tampering and incorrect keys',()=>{
+ const encrypted=seal({refresh_token:'private'},key);
+ assert.ok(!encrypted.includes('private'));
+ assert.equal(unseal(encrypted,key).refresh_token,'private');
+ assert.throws(()=>unseal(encrypted,'cd'.repeat(32)));
+});
+test('Google linking requires account ownership; Calendar retry preserves event identity',async()=>{
+ process.env.GOOGLE_CLIENT_ID='test';process.env.GOOGLE_CLIENT_SECRET='test';process.env.GOOGLE_TOKEN_KEY=key;
+ const db=new DatabaseSync(':memory:');
+ db.exec('CREATE TABLE users(id TEXT, email TEXT, google_sub TEXT UNIQUE, google_tokens TEXT)');
+ db.prepare('INSERT INTO users VALUES (?,?,?,NULL)').run('a','a@example.com','google-a');
+ db.prepare('INSERT INTO users VALUES (?,?,?,NULL)').run('b','b@example.com',null);
+ let payload={sub:'google-a',email:'a@example.com',email_verified:true};let result;let inserts=0;
+ const oauth={getToken:async()=>({tokens:{id_token:'verified',access_token:'private',refresh_token:'private-refresh',scope:'https://www.googleapis.com/auth/calendar.events'}}),verifyIdToken:async()=>({getPayload:()=>payload}),setCredentials:()=>{},request:async o=>{if(o.method==='POST'){inserts++;if(inserts>1)throw {response:{status:409}};return {data:o.data};}return {data:{id:'a'.repeat(32)}};}};
+ const call=async(path,method,body={},id=null)=>googleIntegration({db,identity:async()=>({id}),startSession:async id=>({id}),req:{method,headers:id?{authorization:'Bearer test'}:{}},path,body,send:(_,v)=>result=v,clientFactory:()=>oauth});
+ await assert.rejects(()=>call('/auth/google','POST',{code:'valid',calendar:true},'b'),/another Planify/);
+ await call('/auth/google','POST',{code:'valid',calendar:true},'a');
+ assert.equal(result.connected,true);
+ assert.equal(db.prepare('SELECT google_tokens FROM users WHERE id=?').get('b').google_tokens,null);
+ const body={request_id:'a'.repeat(32),title:'Work',start:'2026-12-01T09:00:00Z',end:'2026-12-01T10:00:00Z'};
+ await call('/users/me/google/calendar/events','POST',body,'a');
+ await call('/users/me/google/calendar/events','POST',body,'a');
+ assert.equal(result.event.id,body.request_id);
+ payload={sub:'google-b',email:'b@example.com',email_verified:true};
+ await assert.rejects(()=>call('/auth/google','POST',{code:'valid'}),/already has a Planify/);
+ await assert.rejects(()=>call('/users/me/google/calendar/events','GET',{},'b'),/Connect Google/);
+ db.close();
+});

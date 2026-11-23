@@ -326,6 +326,27 @@ class _AuthScreenState extends State<AuthScreen> {
                             ),
                           ),
                         const SizedBox(height: 14),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.account_circle_outlined),
+                          label: const Text('Continue with Google'),
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  setState(() {
+                                    busy = true;
+                                    error = null;
+                                  });
+                                  try {
+                                    await widget.session.googleSignIn();
+                                  } catch (e) {
+                                    if (mounted) {
+                                      setState(() => error = e.toString());
+                                    }
+                                  } finally {
+                                    if (mounted) setState(() => busy = false);
+                                  }
+                                },
+                        ),
                         FilledButton(
                           onPressed: busy ? null : submit,
                           child: busy

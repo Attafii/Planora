@@ -1,3 +1,5 @@
+import 'google_bridge.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -205,19 +207,25 @@ class AppSession extends ChangeNotifier {
 
   Future<void> authenticate({
     required bool register,
-    required String email,
-    required String password,
+    String email = '',
+    String password = '',
     String? name,
+    String? googleAuthorizationCode,
   }) async {
     final generation = ++_generation;
     final timezone = register ? await _registrationTimezone() : null;
     if (_disposed || generation != _generation) return;
     final data = await request(
       'POST',
-      register ? '/auth/register' : '/auth/login',
+      googleAuthorizationCode != null
+          ? '/auth/google'
+          : register
+          ? '/auth/register'
+          : '/auth/login',
       {
-        'email': email.trim(),
-        'password': password,
+        'code': ?googleAuthorizationCode,
+        if (googleAuthorizationCode == null) 'email': email.trim(),
+        if (googleAuthorizationCode == null) 'password': password,
         if (register) ...{
           'name': name!.trim(),
           'timezone': timezone,
@@ -245,6 +253,18 @@ class AppSession extends ChangeNotifier {
     restoreError = null;
     _schedule(expiry);
     notifyListeners();
+  }
+
+  Future<void> googleSignIn({bool calendar = false}) async {
+    final config = await request('GET', '/auth/google/config');
+    final id = config['client_id'] as String?;
+    if (id == null) throw const ApiFailure('Google is not configured.');
+    final code = await googleCode(id, calendar);
+    if (calendar) {
+      await request('POST', '/auth/google', {'code': code, 'calendar': true});
+    } else {
+      await authenticate(register: false, googleAuthorizationCode: code);
+    }
   }
 
   void _schedule(DateTime until) {

@@ -1,3 +1,4 @@
+import { googleIntegration } from './google-integration.mjs';
 import { accountAi } from './account-ai.mjs';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
@@ -42,6 +43,11 @@ export function createApi({ accountDb = null, database = resolve('backend/data/p
       collection TEXT NOT NULL, revision INTEGER NOT NULL, snapshot TEXT NOT NULL,
       PRIMARY KEY (user_id, collection)
     );`));
+  for (const column of ['google_sub','google_tokens']) {
+    const columns=await db.prepare('PRAGMA table_info(users)').all();
+    if(!columns.some(c=>c.name===column)) await db.exec(`ALTER TABLE users ADD COLUMN ${column} TEXT`);
+  }
+  await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS google_identity ON users(google_sub)');
   controls = await accountControls({ db, clock, derivePassword, activitySource, dataPolicy, aiPolicy });
   })();
   const limits = new Map();
@@ -129,6 +135,7 @@ export function createApi({ accountDb = null, database = resolve('backend/data/p
         try { body = JSON.parse(raw || '{}'); } catch { throw new ApiError(400, 'json', 'Invalid JSON.'); }
         if (!body || Array.isArray(body) || typeof body !== 'object') fail('Expected an object.');
       }
+      if (await googleIntegration({db,identity,startSession,req,path,body,send,clock})) return;
       if (proposeAgent && req.method === 'POST' && ['/agents/tasks', '/agents/planning', '/agents/focus'].includes(path)) {
         const profile = (await user((await identity(req)).id));
         rateLimit(req);
