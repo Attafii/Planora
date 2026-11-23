@@ -22,7 +22,10 @@ export async function googleIntegration({db,identity,startSession,req,path,body,
     if(typeof body.code!=='string' || body.code.length>4096) throw problem(422,'A Google authorization code is required.');
     let tokens,payload;
     try {
-      ({tokens}=await oauth.getToken(body.code));
+      if(body.code.startsWith('idtoken:')) {
+        if(body.calendar===true) throw Error('Calendar requires authorization.');
+        tokens={id_token:body.code.slice(8)};
+      } else ({tokens}=await oauth.getToken(body.code.startsWith('native:') ? {code:body.code.slice(7),redirect_uri:''} : body.code));
       payload=(await oauth.verifyIdToken({idToken:tokens.id_token,audience:clientId})).getPayload();
     } catch { throw problem(422,'Google authorization failed or expired. Please try again.'); }
     if(!payload?.sub || !payload.email_verified || !payload.email) throw problem(422,'Google did not return a verified identity.');
@@ -69,14 +72,21 @@ export async function googleIntegration({db,identity,startSession,req,path,body,
   try {
     const endpoint='https://www.googleapis.com/calendar/v3/calendars/primary/events';
     if(req.method==='GET') {
-      const result=await oauth.request({url:endpoint,params:{timeMin:new Date(clock()).toISOString(),maxResults:100,singleEvents:true,orderBy:'startTime'}});
-      send(200,{events:result.data.items || []});
+      const result=await oauth.request({url:endpoint,params:{timeMin:new Date(clock()).toISOString(),timeMax:new Date(clock()+31*86400000).toISOString(),maxResults:2500,singleEvents:true,orderBy:'startTime'}});
+      if(result.data.nextPageToken) throw problem(422,'Too many events in the next 31 days. Import cannot safely continue.');
+      send(200,{events:result.data.items || [],range_days:31});
     } else if(req.method==='POST') {
       if(!/^[a-f0-9]{32}$/.test(body.request_id ?? '') || typeof body.title!=='string' || !body.title.trim() || body.title.length>200 || !Number.isFinite(Date.parse(body.start)) || !Number.isFinite(Date.parse(body.end)) || Date.parse(body.start)>=Date.parse(body.end)) throw problem(422,'Enter a title and valid start and end times.');
-      const event={id:body.request_id,summary:body.title.trim(),start:{dateTime:new Date(body.start).toISOString()},end:{dateTime:new Date(body.end).toISOString()}};
+      const event={id:body.request_id,summary:body.title.trim(),start:{dateTime:new Date(body.start).toISOString()},end:{dateTime:new Date(body.end).toISOString()},...(body.planify_export===true ? {extendedProperties:{private:{planify:'true'}}} : {})};
       let result;
       try {result=await oauth.request({url:endpoint,method:'POST',data:event});}
-      catch(e) {if(e.response?.status!==409) throw e; result=await oauth.request({url:`${endpoint}/${event.id}`});}
+      catch(e) {if(e.response?.status!==409) throw e; result=await oauth.request({url:`${endpoint}/${event.id}`});
+        const old=result.data;
+        if(old.summary!==event.summary || Date.parse(old.start?.dateTime)!==Date.parse(event.start.dateTime) || Date.parse(old.end?.dateTime)!==Date.parse(event.end.dateTime)) {
+          if(body.planify_export!==true || old.extendedProperties?.private?.planify!=='true' || !body.expected_etag || body.expected_etag!==old.etag) throw problem(409,'This exported block changed in Google or Planify. Refresh and review a fresh export preview.');
+          result=await oauth.request({url:`${endpoint}/${event.id}`,method:'PATCH',headers:{'If-Match':body.expected_etag},data:event});
+        }
+      }
       send(200,{event:result.data});
     } else throw problem(405,'Method not supported.');
   } catch(e) {if(e.status) throw e; throw problem(502,'Google Calendar could not complete this request. Check consent, Calendar API configuration, and connectivity, then retry.');}

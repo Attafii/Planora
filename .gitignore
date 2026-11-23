@@ -56,3 +56,6 @@ backend/coverage/
 assets/branding/identity-source/font-cache/
 assets/branding/identity-source/review-*.png
 assets/branding/identity-source/font*-proof.png
+
+# Kotlin build cache
+/android/.kotlin/

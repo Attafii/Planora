@@ -15,8 +15,8 @@ test('Google linking requires account ownership; Calendar retry preserves event 
  db.exec('CREATE TABLE users(id TEXT, email TEXT, google_sub TEXT UNIQUE, google_tokens TEXT)');
  db.prepare('INSERT INTO users VALUES (?,?,?,NULL)').run('a','a@example.com','google-a');
  db.prepare('INSERT INTO users VALUES (?,?,?,NULL)').run('b','b@example.com',null);
- let payload={sub:'google-a',email:'a@example.com',email_verified:true};let result;let inserts=0;
- const oauth={getToken:async()=>({tokens:{id_token:'verified',access_token:'private',refresh_token:'private-refresh',scope:'https://www.googleapis.com/auth/calendar.events'}}),verifyIdToken:async()=>({getPayload:()=>payload}),setCredentials:()=>{},request:async o=>{if(o.method==='POST'){inserts++;if(inserts>1)throw {response:{status:409}};return {data:o.data};}return {data:{id:'a'.repeat(32)}};}};
+ let payload={sub:'google-a',email:'a@example.com',email_verified:true};let result;let inserts=0;let saved;let patches=0;
+ const oauth={getToken:async()=>({tokens:{id_token:'verified',access_token:'private',refresh_token:'private-refresh',scope:'https://www.googleapis.com/auth/calendar.events'}}),verifyIdToken:async()=>({getPayload:()=>payload}),setCredentials:()=>{},request:async o=>{if(o.method==='PATCH'){assert.equal(o.headers['If-Match'],'revision-1');patches++;saved={...o.data,etag:'revision-2'};return {data:saved};}if(o.method==='POST'){inserts++;if(inserts>1)throw {response:{status:409}};saved=o.data;return {data:o.data};}return {data:{...saved,id:'a'.repeat(32)}};}};
  const call=async(path,method,body={},id=null)=>googleIntegration({db,identity:async()=>({id}),startSession:async id=>({id}),req:{method,headers:id?{authorization:'Bearer test'}:{}},path,body,send:(_,v)=>result=v,clientFactory:()=>oauth});
  await assert.rejects(()=>call('/auth/google','POST',{code:'valid',calendar:true},'b'),/another Planify/);
  await call('/auth/google','POST',{code:'valid',calendar:true},'a');
@@ -26,8 +26,15 @@ test('Google linking requires account ownership; Calendar retry preserves event 
  await call('/users/me/google/calendar/events','POST',body,'a');
  await call('/users/me/google/calendar/events','POST',body,'a');
  assert.equal(result.event.id,body.request_id);
+ await assert.rejects(()=>call('/users/me/google/calendar/events','POST',{...body,title:'Changed'},'a'),/changed in Google/);
+ await call('/auth/google','POST',{code:'idtoken:verified'},'a');
+ assert.equal(result.id,'a');
  payload={sub:'google-b',email:'b@example.com',email_verified:true};
  await assert.rejects(()=>call('/auth/google','POST',{code:'valid'}),/already has a Planify/);
+ saved={...saved,etag:'revision-1',extendedProperties:{private:{planify:'true'}}};
+ await call('/users/me/google/calendar/events','POST',{...body,title:'Changed',planify_export:true,expected_etag:'revision-1'},'a');
+ assert.equal(patches,1);
+ await assert.rejects(()=>call('/users/me/google/calendar/events','POST',{...body,title:'Again',planify_export:true,expected_etag:'old'},'a'),/fresh export preview/);
  await assert.rejects(()=>call('/users/me/google/calendar/events','GET',{},'b'),/Connect Google/);
  db.close();
 });

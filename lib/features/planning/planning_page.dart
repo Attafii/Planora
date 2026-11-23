@@ -468,8 +468,12 @@ class _PlanningPageState extends State<PlanningPage> {
                   : () => Navigator.push(
                       context,
                       MaterialPageRoute<void>(
-                        builder: (_) =>
-                            GoogleCalendarPage(session: widget.session!),
+                        builder: (_) => GoogleCalendarPage(
+                          session: widget.session!,
+                          store: store,
+                          date: date,
+                          review: review,
+                        ),
                       ),
                     ),
               icon: const Icon(Icons.calendar_month_outlined),
