@@ -71,4 +71,6 @@ The Flutter app uses `AppSession` for account identity, session restoration, and
 
 ## Current limits
 
+
 Google Calendar access requires a configured Google Cloud project and user consent. It does not yet import busy events into Planify's scheduling constraints or export approved plans. Android and iOS Google clients are pending. Email delivery for password recovery is not configured. Sensitive account export and deletion remain gated on the documented policy decision. The local web server is a development preview, not production hosting.
+
