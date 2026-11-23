@@ -66,10 +66,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<!-- Set GOOGLE_REVERSED_CLIENT_ID in Xcode build settings to the iOS OAuth reversed client ID. -->
+	<!-- Callback scheme for the registered Planify iOS Google OAuth client. -->
 	<key>CFBundleURLTypes</key>
 	<array><dict><key>CFBundleTypeRole</key><string>Editor</string>
-	<key>CFBundleURLSchemes</key><array><string>$(GOOGLE_REVERSED_CLIENT_ID)</string></array>
+	<key>CFBundleURLSchemes</key><array><string>com.googleusercontent.apps.408247407549-j47mofcp5bkhsapep2if7957li1tfo1a</string></array>
 	</dict></array>
 </dict>
 </plist>

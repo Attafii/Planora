@@ -9,7 +9,8 @@ Future<String> googleCode(String clientId, bool calendar) async {
       'Google sign-in is supported on Android, iOS and web.',
     );
   }
-  const ios = String.fromEnvironment('GOOGLE_IOS_CLIENT_ID');
+  const ios =
+      '408247407549-j47mofcp5bkhsapep2if7957li1tfo1a.apps.googleusercontent.com';
   if (defaultTargetPlatform == TargetPlatform.iOS && ios.isEmpty) {
     throw StateError(
       'Google iOS OAuth client and URL scheme must be configured before signing in.',
@@ -17,7 +18,7 @@ Future<String> googleCode(String clientId, bool calendar) async {
   }
   final google = GoogleSignIn.instance;
   await (_ready ??= google.initialize(
-    clientId: ios.isEmpty ? null : ios,
+    clientId: defaultTargetPlatform == TargetPlatform.iOS ? ios : null,
     serverClientId: clientId,
   ));
   final account = await google.authenticate();
