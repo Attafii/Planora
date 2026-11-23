@@ -297,9 +297,72 @@ class PersonalSync extends ChangeNotifier {
     }
   }
 
-  Future<void> resolve(String collection, {required bool keepLocal}) async {
+  Map<String, dynamic> preview(String collection) {
+    final state = _collections[collection]!;
+    Map<String, dynamic> records(String? raw) {
+      if (raw == null) return {};
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return {for (final row in decoded) (row as Map)['id'].toString(): row};
+      }
+      return Map<String, dynamic>.from(decoded as Map);
+    }
+
+    final local = records(state.local),
+        remote = records(state.remote?.snapshot);
+    final added = local.keys.where((id) => !remote.containsKey(id)).toList();
+    final removed = remote.keys.where((id) => !local.containsKey(id)).toList();
+    final changed = local.keys
+        .where(
+          (id) =>
+              remote.containsKey(id) && !mapEqualsDeep(local[id], remote[id]),
+        )
+        .toList();
+    return {
+      'collection': collection,
+      'base_revision': state.base.revision,
+      'remote_revision': state.remote?.revision ?? state.base.revision,
+      'counts': {
+        'added': added.length,
+        'removed': removed.length,
+        'changed': changed.length,
+      },
+      'details': [
+        for (final id in {...added, ...removed, ...changed})
+          {'id': id, 'device': local[id], 'server': remote[id]},
+      ],
+      'fingerprint': jsonEncode({
+        'local': state.local,
+        'base': state.base.toJson(),
+        'remote': state.remote?.toJson(),
+      }),
+    };
+  }
+
+  bool mapEqualsDeep(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);
+
+  Future<void> resolve(
+    String collection, {
+    required bool keepLocal,
+    String? expectedPreview,
+  }) async {
+    if (expectedPreview != null) {
+      await sync();
+      if (offline || error != null || session.account?.id != accountId) {
+        throw const ApiFailure(
+          'Reconnect and refresh the preview before resolving. Your edits are preserved.',
+        );
+      }
+    }
     await _inFlight;
     await _locked(() async {
+      if (expectedPreview != null &&
+          preview(collection)['fingerprint'] != expectedPreview) {
+        throw const ApiFailure(
+          'The local or server version changed. Review a fresh preview.',
+          status: 409,
+        );
+      }
       final current = _collections[collection]!;
       final remote = current.remote;
       if (remote == null) return;

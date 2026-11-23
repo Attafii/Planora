@@ -124,3 +124,20 @@ test('preferences compare original values only for touched fields', async t => {
   assert.equal((await patch({ theme: 'light', expected: { theme: 'system' } })).status, 409);
   assert.equal((await patch({ theme: 'dark', expected: { theme: 'system' } })).status, 200);
 });
+
+test('setup drafts persist, isolate accounts and reject stale changes; AI is consent gated',async t=>{
+ const f=await fixture();t.after(f.close);
+ const a=(await f.call('/auth/register','POST',credentials())).data;
+ const b=(await f.call('/auth/register','POST',credentials('second@example.com'))).data;
+ const path='/users/me/onboarding';
+ assert.equal((await f.call(path,'GET',undefined,a.token)).data.status,'new');
+ const draft={needs:'French with dark appearance',theme:'dark',language:'fr',timezone:'Africa/Tunis'};
+ assert.equal((await f.call(path,'PATCH',{revision:0,status:'draft',draft},a.token)).data.revision,1);
+ assert.equal((await f.call(path,'GET',undefined,b.token)).data.status,'new');
+ assert.equal((await f.call(path,'PATCH',{revision:0,status:'skipped',draft:{}},a.token)).status,409);
+ assert.deepEqual((await f.call(path,'GET',undefined,a.token)).data.draft,draft);
+ assert.equal((await f.call('/users/me/setup-assist','POST',{needs:'help',context_consent:true},a.token)).status,403);
+ assert.equal((await f.call('/users/me','GET',undefined,a.token)).data.preferences.theme,'system');
+ const login=(await f.call('/auth/login','POST',{email:credentials().email,password:credentials().password})).data;
+ assert.deepEqual((await f.call(path,'GET',undefined,login.token)).data.draft,draft);
+});

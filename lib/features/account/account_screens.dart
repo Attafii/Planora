@@ -1,3 +1,5 @@
+import 'account_setup.dart';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:timezone/timezone.dart' as tz;
@@ -1368,6 +1370,11 @@ class _PreferencesPageState extends State<PreferencesPage> {
                     fontSize: 21,
                     fontWeight: FontWeight.w600,
                   ),
+                ),
+                TextButton.icon(
+                  onPressed: () => openAccountSetup(context, widget.session),
+                  icon: const Icon(Icons.auto_awesome_outlined),
+                  label: const Text('Personalized setup · resume or revisit'),
                 ),
                 const SizedBox(height: 24),
                 DropdownMenu<String>(

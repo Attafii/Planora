@@ -1,3 +1,8 @@
+import 'dart:convert';
+
+import '../features/account/account_setup.dart';
+import '../features/account/sync_issue_dialog.dart';
+
 import 'dart:async';
 import 'dart:ui';
 
@@ -218,6 +223,56 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => offerSetup());
+  }
+
+  Future<void> offerSetup() async {
+    try {
+      final cached = await SharedPreferencesAsync().getString(
+        'planify.setup.v1.${widget.session.baseUrl}.$accountId',
+      );
+      if (cached != null &&
+          (jsonDecode(cached) as Map)['status'] == 'skipped') {
+        return;
+      }
+      final state = await widget.session.request('GET', '/users/me/onboarding');
+      if (!mounted ||
+          ModalRoute.of(context)?.isCurrent != true ||
+          state['status'] != 'new') {
+        return;
+      }
+      final start = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Make Planify yours'),
+          content: const Text(
+            'Set up your language, appearance and timezone manually or with AI suggestions. You can revisit setup from Preferences.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Set up'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (start == true) {
+        await openAccountSetup(context, widget.session);
+      } else {
+        await widget.session.request('PATCH', '/users/me/onboarding', {
+          'revision': state['revision'],
+          'status': 'skipped',
+          'draft': {},
+        });
+      }
+    } catch (_) {
+      /* Setup remains available from Preferences when reconnected. */
+    }
   }
 
   @override
@@ -479,6 +534,12 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
             children: [
               Text(syncMessage),
               if (sync.error case final message?) Text(message),
+              if (sync.offline || sync.error != null)
+                TextButton(
+                  onPressed: () =>
+                      showSyncFailureHelp(dialog, widget.session, sync.offline),
+                  child: const Text('Explain this sync failure'),
+                ),
               for (final entry in sync.updates.entries)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -518,49 +579,48 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     String collection,
     bool conflict,
   ) async {
+    final preview = sync.preview(collection);
     final keepLocal = await showDialog<bool>(
       context: dialog,
-      builder: (choice) => AlertDialog(
-        title: Text(PersonalSync.labels[collection]!),
-        content: Text(
-          conflict
-              ? 'Choose the version to use. Planify saves a copy of the other version on this device.'
-              : 'Load the version saved by your other device?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(choice),
-            child: const Text('Cancel'),
-          ),
-          if (conflict)
-            TextButton(
-              onPressed: () => Navigator.pop(choice, true),
-              child: const Text('Keep this device'),
-            ),
-          FilledButton(
-            onPressed: () => Navigator.pop(choice, false),
-            child: const Text('Use other device'),
-          ),
-        ],
+      builder: (_) => SyncIssueDialog(
+        session: widget.session,
+        preview: preview,
+        conflict: conflict,
       ),
     );
     if (keepLocal == null || !mounted || !dialog.mounted) return;
     Navigator.pop(dialog);
     focus.suspend();
-    setState(() => ready = applyVersion(collection, keepLocal));
+    setState(
+      () => ready = applyVersion(
+        collection,
+        keepLocal,
+        expectedPreview: preview['fingerprint'] as String,
+      ),
+    );
   }
 
-  Future<void> applyVersion(String collection, bool keepLocal) async {
+  Future<void> applyVersion(
+    String collection,
+    bool keepLocal, {
+    String? expectedPreview,
+  }) async {
     await Future.wait([tasks.settled, planning.settled, focus.settled]);
     if (!mounted) return;
     try {
-      await sync.resolve(collection, keepLocal: keepLocal);
+      await sync.resolve(
+        collection,
+        keepLocal: keepLocal,
+        expectedPreview: expectedPreview,
+      );
       workspaceVersion++;
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Could not switch versions. Please retry.'),
+            content: Text(
+              'Could not switch versions. Reconnect and review a fresh preview; your edits are preserved.',
+            ),
           ),
         );
       }

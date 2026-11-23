@@ -133,3 +133,6 @@ Eya's screens use the supplied Planify identity: navy, blue, teal, violet and
 warm off-white; Manrope display type and Inter body type. The logo is a scalable
 vector recreation of the supplied board. See assets/branding/README.md for the
 editable symbol, font licenses and platform-icon generation instructions.
+
+Personalized account setup and metadata-only sync explanations are described in
+[Eya AI setup and sync help](docs/EYA_AI_SETUP.md).

@@ -95,7 +95,7 @@ class AppSession extends ChangeNotifier {
       final response = await client
           .send(req)
           .then(http.Response.fromStream)
-          .timeout(const Duration(seconds: 10));
+          .timeout(Duration(seconds: path.endsWith('-assist') ? 75 : 10));
       if (path != '/auth/logout' && (_disposed || generation != _generation)) {
         throw const ApiFailure(ended, status: 401);
       }

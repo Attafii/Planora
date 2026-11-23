@@ -1,3 +1,4 @@
+import { accountAi } from './account-ai.mjs';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, randomUUID, createHash, scrypt, timingSafeEqual } from 'node:crypto';
@@ -208,6 +209,12 @@ export function createApi({ accountDb = null, database = resolve('backend/data/p
           (await db.exec('COMMIT'));
         } catch (error) { (await db.exec('ROLLBACK')); throw error; }
         return send(200, result);
+      }
+      if (['/users/me/onboarding','/users/me/setup-assist','/users/me/sync-assist'].includes(path)) {
+        if(path.endsWith('-assist')) rateLimit(req);
+        const result=await accountAi({db,auth,path,method:req.method,body,profile:await user(auth.id),lockAccount:accountDb ? id=>accountDb.lockAccount(id) : null});
+        if(path.endsWith('-assist') && !(await user(auth.id)).preferences.cloud_ai) throw new ApiError(403,'consent_required','Cloud AI was disabled. Nothing was applied.');
+        return send(200,result);
       }
       const controlled = await controls.handle({ req, path, url, body, auth });
       if (controlled) return send(controlled.status, controlled.data);

@@ -272,7 +272,11 @@ void main() {
       await sync.open();
       expect(sync.updates, {'tasks': true});
       expect(await sync.read(key), '[{"id":"local"}]');
-      await sync.resolve('tasks', keepLocal: false);
+      final preview = sync.preview('tasks');
+      expect(preview['counts'], {'added': 1, 'removed': 1, 'changed': 0});
+      await expectLater(sync.resolve('tasks', keepLocal: false, expectedPreview: 'stale'), throwsA(isA<ApiFailure>()));
+      expect(await sync.read(key), '[{"id":"local"}]');
+      await sync.resolve('tasks', keepLocal: false, expectedPreview: preview['fingerprint'] as String);
       expect(await sync.read(key), '[{"id":"remote"}]');
       expect(sync.versions('tasks'), ['[{"id":"local"}]']);
       sync.dispose();

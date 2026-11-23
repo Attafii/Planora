@@ -10,6 +10,7 @@ export async function accountControls({ db, clock, derivePassword, activitySourc
     if (!(await db.prepare(`PRAGMA table_info(${table})`).all()).some(c => c.name === name)) (await db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`));
   };
   for (const [key, type] of Object.entries({ id: 'TEXT', created_at: 'INTEGER', last_used_at: 'INTEGER', device: 'TEXT', reauthenticated_at: 'INTEGER' })) await addColumn('sessions', key, type);
+  await addColumn('users', 'onboarding_state', 'TEXT');
   await addColumn('users', 'timezone_reviewed', 'INTEGER NOT NULL DEFAULT 0');
   (await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS session_public_id ON sessions(id);
     CREATE TABLE IF NOT EXISTS account_notices (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, type TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
