@@ -71,4 +71,4 @@ The Flutter app uses `AppSession` for account identity, session restoration, and
 
 ## Current limits
 
-Google Calendar access requires a configured Google Cloud project and user consent. Calendar import/export is manual and reviewed per selected day within the next 30 days; deletions are not propagated automatically. Android and iOS Google Cloud client registration is still required. Email delivery for password recovery is not configured. Sensitive account export and deletion remain gated on the documented policy decision. The local web server is a development preview, not production hosting.
+Google Calendar access requires a configured Google Cloud project and user consent. Calendar import/export is manual and reviewed per selected day within the next 30 days; deletions are not propagated automatically. Android and iOS Google client IDs are configured; device sign-in and Google Cloud registration restrictions still need live verification. Email delivery for password recovery is not configured. Sensitive account export and deletion remain gated on the documented policy decision. The local web server is a development preview, not production hosting.

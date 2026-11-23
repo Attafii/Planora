@@ -27,9 +27,17 @@ Export previews future, eligible approved task blocks with UTC times before Goog
 Native Android/iOS code now uses google_sign_in, returning verified Google identity tokens for login and server authorization codes for Calendar. No client secret is embedded in the mobile app. Platform registration is an external requirement, not completed by possession of the web client credentials:
 
 1. In project planify-515609 create an Android OAuth client with package com.example.mobile_project and the signing SHA-1. Current local debug SHA-1 is EC:75:BD:3F:52:2F:3B:A9:08:77:64:94:78:55:A1:15:5C:65:9A:C5. Register release and Play signing certificates separately before distribution. The web client is supplied as serverClientId automatically from backend config; no google-services.json is required for this setup.
-2. Create an iOS OAuth client with bundle ID com.example.mobileProject. Build with --dart-define=GOOGLE_IOS_CLIENT_ID=<iOS client ID>. In Xcode set GOOGLE_REVERSED_CLIENT_ID to that client's reversed identifier; Info.plist uses it as the callback URL scheme. These public client IDs are not secrets.
+2. The supplied iOS client is configured for bundle ID com.example.mobileProject. Its client ID and callback URL scheme are included in Dart and Info.plist; no extra Dart define or Xcode variable is required. These public client IDs are not secrets.
 3. Enable Calendar API and grant tester access. Run with a reachable HTTPS API on devices; localhost on a phone points to that phone.
 
-No physical Android/iOS device was connected during this change. iOS compilation and device consent cannot be verified on Windows. Live Google authorization remains subject to the project owner finishing mobile client registration and approving consent. New Google-only accounts still lack provider-based reauthentication for password-protected sensitive account actions.
+No physical Android/iOS device was connected during this change. iOS compilation and device consent cannot be verified on Windows. The owner supplied Android and iOS client IDs; live Google authorization still requires matching registration settings and user consent. New Google-only accounts still lack provider-based reauthentication for password-protected sensitive account actions.
 
 Verification for the reviewed-sync/native change: 75 Flutter tests passed; 42 backend tests passed with one optional live Neon test skipped; focused import/export and provider tests passed; Android debug APK compiled successfully. Initial web release build passed. Real-device sign-in, consent, and live Google event writes were not verified.
+
+
+## Registered mobile client IDs
+
+- Android: 408247407549-6jq87fje0d9l6kps4skcuv8rlvlb7nql.apps.googleusercontent.com. Android identifies this registration by package and signing certificate. Dart intentionally passes the existing web client as serverClientId, not the Android client ID.
+- iOS: 408247407549-j47mofcp5bkhsapep2if7957li1tfo1a.apps.googleusercontent.com. Dart initializes this iOS client only on iOS, and Info.plist registers com.googleusercontent.apps.408247407549-j47mofcp5bkhsapep2if7957li1tfo1a as the callback scheme.
+
+These IDs were supplied by the project owner on 23 November 2026. Their Google Cloud package/certificate/bundle restrictions cannot be verified from the IDs alone. Test consent on a registered Android device and on iOS through macOS/Xcode before release.
